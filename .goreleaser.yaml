@@ -33,3 +33,9 @@ brews:
       bin.install "tokenmanager"
     test: |
       system "#{bin}/tokenmanager", "--version"
+
+# The repo was renamed from tokenusage; pin it so uploads do not follow the old remote.
+release:
+  github:
+    owner: ht2803-max
+    name: tokenmanager
