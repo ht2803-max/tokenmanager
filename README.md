@@ -7,13 +7,7 @@ and shows usage, estimated cost, budgets and optimization advice. It runs in the
 terminal (with an optional static HTML export), needs no account, and sends
 nothing off your machine.
 
-```
- ◆ TokenManager  1 Overview  2 Usage  3 Agents  4 Sessions  5 Projects  6 Models  7 Optimize  8 Budgets  9 Settings
-╭ Today ──────────╮╭ This week ──────╮╭ This month ─────────────╮╭ Projected month ────────╮
-│ $5.21           ││ $38.60          ││ $199.73                 ││ $200.79                 │
-│ 6.58M tokens    ││ 61M tokens      ││ 580M tokens · cache 571M││ budget $250.00          │
-╰─────────────────╯╰─────────────────╯╰─────────────────────────╯╰─────────────────────────╯
-```
+![TokenManager dashboard tour: overview, usage, agents, sessions, models and optimization advice](docs/demo.gif)
 
 ## Install
 
