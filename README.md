@@ -3,8 +3,9 @@
 A terminal-native dashboard for the tokens and money your AI coding agents spend.
 It reads the session files that Claude Code, OpenAI Codex, Gemini CLI, Aider and
 Continue already write to disk, normalizes them into one local SQLite database,
-and shows usage, estimated cost, budgets and optimization advice. It has no web
-UI, needs no account, and sends nothing off your machine.
+and shows usage, estimated cost, budgets and optimization advice. It runs in the
+terminal (with an optional static HTML export), needs no account, and sends
+nothing off your machine.
 
 ```
  ◆ TokenManager  1 Overview  2 Usage  3 Agents  4 Sessions  5 Projects  6 Models  7 Optimize  8 Budgets  9 Settings
@@ -15,6 +16,17 @@ UI, needs no account, and sends nothing off your machine.
 ```
 
 ## Install
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew install ht2803-max/tap/tokenmanager
+```
+
+Prebuilt binaries for macOS, Linux and Windows are also on the
+[releases page](https://github.com/ht2803-max/tokenmanager/releases).
+
+### With Go
 
 Requires Go 1.27.3 or newer. An older Go 1.21+ install downloads the newer toolchain automatically.
 
@@ -45,12 +57,7 @@ pure Go, so no C toolchain is needed.
 
 Tagged releases are built with `goreleaser release --clean` using
 `.goreleaser.yaml`, which publishes archives for each platform and a formula to
-the `ht2803-max/homebrew-tap` repository (create that repository first). Once a
-release exists:
-
-```bash
-brew install ht2803-max/tap/tokenmanager
-```
+the `ht2803-max/homebrew-tap` repository.
 
 ## Quick start
 
