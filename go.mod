@@ -1,4 +1,4 @@
-module github.com/tokenmanager/tokenmanager
+module github.com/ht2803-max/tokenmanager
 
 go 1.27.3
 

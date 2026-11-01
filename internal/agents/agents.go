@@ -12,9 +12,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tokenmanager/tokenmanager/internal/config"
-	"github.com/tokenmanager/tokenmanager/internal/model"
-	"github.com/tokenmanager/tokenmanager/internal/parser"
+	"github.com/ht2803-max/tokenmanager/internal/config"
+	"github.com/ht2803-max/tokenmanager/internal/model"
+	"github.com/ht2803-max/tokenmanager/internal/parser"
 )
 
 // ReadMode tells the collector how a source file grows.

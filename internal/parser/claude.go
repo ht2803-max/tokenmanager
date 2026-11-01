@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/tokenmanager/tokenmanager/internal/model"
+	"github.com/ht2803-max/tokenmanager/internal/model"
 )
 
 // claudeLine is the subset of a Claude Code transcript line we read.

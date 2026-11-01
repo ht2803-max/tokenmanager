@@ -16,11 +16,11 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/tokenmanager/tokenmanager/internal/agents"
-	"github.com/tokenmanager/tokenmanager/internal/config"
-	"github.com/tokenmanager/tokenmanager/internal/model"
-	"github.com/tokenmanager/tokenmanager/internal/parser"
-	"github.com/tokenmanager/tokenmanager/internal/storage"
+	"github.com/ht2803-max/tokenmanager/internal/agents"
+	"github.com/ht2803-max/tokenmanager/internal/config"
+	"github.com/ht2803-max/tokenmanager/internal/model"
+	"github.com/ht2803-max/tokenmanager/internal/parser"
+	"github.com/ht2803-max/tokenmanager/internal/storage"
 )
 
 // Collector reads agent files into the database.

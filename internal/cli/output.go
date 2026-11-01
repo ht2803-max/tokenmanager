@@ -9,7 +9,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/tokenmanager/tokenmanager/internal/format"
+	"github.com/ht2803-max/tokenmanager/internal/format"
 )
 
 var (

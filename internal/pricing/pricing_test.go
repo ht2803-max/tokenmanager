@@ -4,8 +4,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/tokenmanager/tokenmanager/internal/config"
-	"github.com/tokenmanager/tokenmanager/internal/model"
+	"github.com/ht2803-max/tokenmanager/internal/config"
+	"github.com/ht2803-max/tokenmanager/internal/model"
 )
 
 func near(a, b float64) bool { return math.Abs(a-b) < 1e-9 }

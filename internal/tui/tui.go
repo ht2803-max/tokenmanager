@@ -9,15 +9,15 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/tokenmanager/tokenmanager/internal/agents"
-	"github.com/tokenmanager/tokenmanager/internal/analytics"
-	"github.com/tokenmanager/tokenmanager/internal/budget"
-	"github.com/tokenmanager/tokenmanager/internal/collector"
-	"github.com/tokenmanager/tokenmanager/internal/config"
-	"github.com/tokenmanager/tokenmanager/internal/daemon"
-	"github.com/tokenmanager/tokenmanager/internal/model"
-	"github.com/tokenmanager/tokenmanager/internal/optimizer"
-	"github.com/tokenmanager/tokenmanager/internal/storage"
+	"github.com/ht2803-max/tokenmanager/internal/agents"
+	"github.com/ht2803-max/tokenmanager/internal/analytics"
+	"github.com/ht2803-max/tokenmanager/internal/budget"
+	"github.com/ht2803-max/tokenmanager/internal/collector"
+	"github.com/ht2803-max/tokenmanager/internal/config"
+	"github.com/ht2803-max/tokenmanager/internal/daemon"
+	"github.com/ht2803-max/tokenmanager/internal/model"
+	"github.com/ht2803-max/tokenmanager/internal/optimizer"
+	"github.com/ht2803-max/tokenmanager/internal/storage"
 )
 
 // Views, in keyboard order 1-9.

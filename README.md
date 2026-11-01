@@ -16,16 +16,41 @@ UI, needs no account, and sends nothing off your machine.
 
 ## Install
 
+Requires Go 1.27.3 or newer. An older Go 1.21+ install downloads the newer toolchain automatically.
+
 ```bash
-go install github.com/tokenmanager/tokenmanager/cmd/tokenmanager@latest
+go install github.com/ht2803-max/tokenmanager/cmd/tokenmanager@latest
 ```
 
-From source: `make build` (binary in `bin/`), or `make cross` for macOS, Linux and
-Windows binaries. SQLite is pure Go, so no C toolchain is needed.
-Release archives and a Homebrew tap are produced by `goreleaser release` using
-`.goreleaser.yaml`. Set the `OWNER` placeholder to your GitHub account first. The
-module path `github.com/tokenmanager/tokenmanager` is also a placeholder: change
-it in `go.mod` to wherever the repository is hosted.
+This puts `tokenmanager` in `$(go env GOPATH)/bin` (usually `~/go/bin`). If the
+command isn't found afterwards, add that directory to your `PATH`:
+
+```bash
+export PATH="$PATH:$(go env GOPATH)/bin"
+```
+
+### From source
+
+```bash
+git clone https://github.com/ht2803-max/tokenmanager.git
+cd tokenmanager
+make build        # binary in bin/tokenmanager
+make install      # or install into $(go env GOPATH)/bin
+```
+
+`make cross` builds macOS, Linux and Windows binaries into `dist/`. SQLite is
+pure Go, so no C toolchain is needed.
+
+### Releases and Homebrew
+
+Tagged releases are built with `goreleaser release --clean` using
+`.goreleaser.yaml`, which publishes archives for each platform and a formula to
+the `ht2803-max/homebrew-tap` repository (create that repository first). Once a
+release exists:
+
+```bash
+brew install ht2803-max/tap/tokenmanager
+```
 
 ## Quick start
 

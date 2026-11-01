@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tokenmanager/tokenmanager/internal/analytics"
-	"github.com/tokenmanager/tokenmanager/internal/format"
-	"github.com/tokenmanager/tokenmanager/internal/model"
-	"github.com/tokenmanager/tokenmanager/internal/storage"
+	"github.com/ht2803-max/tokenmanager/internal/analytics"
+	"github.com/ht2803-max/tokenmanager/internal/format"
+	"github.com/ht2803-max/tokenmanager/internal/model"
+	"github.com/ht2803-max/tokenmanager/internal/storage"
 )
 
 // Severity orders findings.

@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tokenmanager/tokenmanager/internal/config"
-	"github.com/tokenmanager/tokenmanager/internal/model"
-	"github.com/tokenmanager/tokenmanager/internal/pricing"
-	"github.com/tokenmanager/tokenmanager/internal/storage"
+	"github.com/ht2803-max/tokenmanager/internal/config"
+	"github.com/ht2803-max/tokenmanager/internal/model"
+	"github.com/ht2803-max/tokenmanager/internal/pricing"
+	"github.com/ht2803-max/tokenmanager/internal/storage"
 )
 
 // Engine answers usage questions from the database.

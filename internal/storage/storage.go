@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tokenmanager/tokenmanager/internal/model"
+	"github.com/ht2803-max/tokenmanager/internal/model"
 	_ "modernc.org/sqlite"
 )
 

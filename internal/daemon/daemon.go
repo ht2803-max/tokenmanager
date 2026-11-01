@@ -15,13 +15,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tokenmanager/tokenmanager/internal/analytics"
-	"github.com/tokenmanager/tokenmanager/internal/budget"
-	"github.com/tokenmanager/tokenmanager/internal/collector"
-	"github.com/tokenmanager/tokenmanager/internal/config"
-	"github.com/tokenmanager/tokenmanager/internal/format"
-	"github.com/tokenmanager/tokenmanager/internal/model"
-	"github.com/tokenmanager/tokenmanager/internal/storage"
+	"github.com/ht2803-max/tokenmanager/internal/analytics"
+	"github.com/ht2803-max/tokenmanager/internal/budget"
+	"github.com/ht2803-max/tokenmanager/internal/collector"
+	"github.com/ht2803-max/tokenmanager/internal/config"
+	"github.com/ht2803-max/tokenmanager/internal/format"
+	"github.com/ht2803-max/tokenmanager/internal/model"
+	"github.com/ht2803-max/tokenmanager/internal/storage"
 )
 
 // PIDPath is the daemon pid file.

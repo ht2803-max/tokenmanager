@@ -1,5 +1,4 @@
 # Release with: goreleaser release --clean   (needs a git tag and GITHUB_TOKEN)
-# Replace OWNER below with the GitHub account that hosts the repo and tap.
 version: 2
 project_name: tokenmanager
 
@@ -9,7 +8,7 @@ builds:
     env: [CGO_ENABLED=0]
     flags: [-trimpath]
     ldflags:
-      - -s -w -X github.com/tokenmanager/tokenmanager/internal/cli.Version={{.Version}}
+      - -s -w -X github.com/ht2803-max/tokenmanager/internal/cli.Version={{.Version}}
     goos: [darwin, linux, windows]
     goarch: [amd64, arm64]
 
@@ -26,9 +25,9 @@ checksum:
 brews:
   - name: tokenmanager
     repository:
-      owner: OWNER
+      owner: ht2803-max
       name: homebrew-tap
-    homepage: https://github.com/OWNER/tokenmanager
+    homepage: https://github.com/ht2803-max/tokenmanager
     description: Terminal dashboard for AI coding agent token usage and spend
     install: |
       bin.install "tokenmanager"

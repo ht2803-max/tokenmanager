@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/tokenmanager/tokenmanager/internal/config"
-	"github.com/tokenmanager/tokenmanager/internal/model"
+	"github.com/ht2803-max/tokenmanager/internal/config"
+	"github.com/ht2803-max/tokenmanager/internal/model"
 )
 
 // Price is USD per million tokens.

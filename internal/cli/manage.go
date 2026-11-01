@@ -14,14 +14,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tokenmanager/tokenmanager/internal/agents"
-	"github.com/tokenmanager/tokenmanager/internal/analytics"
-	"github.com/tokenmanager/tokenmanager/internal/budget"
-	"github.com/tokenmanager/tokenmanager/internal/config"
-	"github.com/tokenmanager/tokenmanager/internal/daemon"
-	"github.com/tokenmanager/tokenmanager/internal/format"
-	"github.com/tokenmanager/tokenmanager/internal/model"
-	"github.com/tokenmanager/tokenmanager/internal/optimizer"
+	"github.com/ht2803-max/tokenmanager/internal/agents"
+	"github.com/ht2803-max/tokenmanager/internal/analytics"
+	"github.com/ht2803-max/tokenmanager/internal/budget"
+	"github.com/ht2803-max/tokenmanager/internal/config"
+	"github.com/ht2803-max/tokenmanager/internal/daemon"
+	"github.com/ht2803-max/tokenmanager/internal/format"
+	"github.com/ht2803-max/tokenmanager/internal/model"
+	"github.com/ht2803-max/tokenmanager/internal/optimizer"
 )
 
 // ---------------------------------------------------------------- optimize

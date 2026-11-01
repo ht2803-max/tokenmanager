@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tokenmanager/tokenmanager/internal/agents"
-	"github.com/tokenmanager/tokenmanager/internal/analytics"
-	"github.com/tokenmanager/tokenmanager/internal/format"
-	"github.com/tokenmanager/tokenmanager/internal/model"
+	"github.com/ht2803-max/tokenmanager/internal/agents"
+	"github.com/ht2803-max/tokenmanager/internal/analytics"
+	"github.com/ht2803-max/tokenmanager/internal/format"
+	"github.com/ht2803-max/tokenmanager/internal/model"
 )
 
 // aggJSON is the machine-readable form of an aggregate.
