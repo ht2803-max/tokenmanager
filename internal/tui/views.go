@@ -580,7 +580,7 @@ func (m *Model) agentNote() string {
 	st := d.agentSt[i]
 	roots := "no data directory found"
 	if len(st.Roots) > 0 {
-		roots = strings.Join(st.Roots, ", ")
+		roots = shortPaths(st.Roots)
 	}
 	return stDim.Render(st.Adapter.Note) + "\n" + stDim.Render(fmt.Sprintf("Sources: %s · %d files", roots, len(st.Files)))
 }
@@ -767,7 +767,7 @@ func (m *Model) modelsView(h int) string {
 	if len(rows) == 0 {
 		return panel(title, stDim.Render("Nothing matches."), w, h, true)
 	}
-	note := stDim.Render("Unpriced models: add USD-per-million prices under \"pricing:\" in " + config.Path())
+	note := stDim.Render("Unpriced models: add USD-per-million prices under \"pricing:\" in " + analytics.ShortProject(config.Path()))
 	listH := h
 	if m.detail {
 		listH = max(6, h/2)
@@ -946,8 +946,8 @@ func (m *Model) settingsView(h int) string {
 		retention = fmt.Sprintf("%d days", c.RetentionDays)
 	}
 	lines := []string{
-		kv("Config file", config.Path()),
-		kv("Database", c.DBPath()+stDim.Render(fmt.Sprintf("  (%s requests, %d files tracked)", format.Thousands(st.Records), st.Files))),
+		kv("Config file", analytics.ShortProject(config.Path())),
+		kv("Database", analytics.ShortProject(c.DBPath())+stDim.Render(fmt.Sprintf("  (%s requests, %d files tracked)", format.Thousands(st.Records), st.Files))),
 		kv("History", fmt.Sprintf("%s → %s", st.First.Local().Format("Jan 2 2006"), st.Last.Local().Format("Jan 2 2006"))),
 		kv("Currency", fmt.Sprintf("%s (rate %g from USD)", c.Currency, c.CurrencyRate)),
 		kv("Refresh interval", c.RefreshInterval.Duration.String()+stDim.Render(" (live updates use file events)")),
@@ -966,9 +966,18 @@ func (m *Model) settingsView(h int) string {
 		} else if s.Installed {
 			state = stGood.Render(fmt.Sprintf("detected · %d files", len(s.Files)))
 		}
-		roots := strings.Join(s.Roots, ", ")
+		roots := shortPaths(s.Roots)
 		lines = append(lines, "  "+fit(agentStyle(s.Adapter.Name).Render(s.Adapter.Display), 14)+" "+fit(state, 24)+" "+stDim.Render(roots))
 	}
 	lines = append(lines, "", stDim.Render("Edit the config file to enable/disable agents, override paths, add prices or budgets.\nPrivacy: only token counts, model names, session ids and project paths are stored. No prompts or code."))
 	return panel("Settings", strings.Join(lines, "\n"), m.w, h, true)
+}
+
+// shortPaths joins paths for display with the home directory shown as ~.
+func shortPaths(ps []string) string {
+	out := make([]string, len(ps))
+	for i, p := range ps {
+		out[i] = analytics.ShortProject(p)
+	}
+	return strings.Join(out, ", ")
 }
