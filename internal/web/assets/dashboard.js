@@ -522,6 +522,7 @@
       kpi('This month', costText(month.cost, month.unpriced), [el('b', null, tokens(tokTotal(month))), ' tokens · ' + M.month_label]),
       kpi('Projected month', money(projected), projMeta),
       budgetTile));
+    if (D.limits.length) renderLimits(root);
 
     // Selected range.
     var sel = selected(), t = total(sel), sess = selectedSessions();
@@ -557,6 +558,94 @@
     items.sort(function (a, b) { return b.value - a.value; });
     hbars(c4.body, items);
     if (t.unpriced > 0) root.appendChild(unpricedNote(sel));
+  }
+
+  // ------------------------------------------------------------ subscription windows
+
+  // The page is a snapshot: remaining times were computed at export and are
+  // always printed next to the generation time they are relative to.
+  function clock(ms) {
+    var d = new Date(ms);
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+  function windowRows(w) {
+    var known = w.source !== 'none', st = statusOf(w.fraction);
+    return [
+      el('div', { class: 'budget-amounts' }, el('b', null, tokens(w.counted)), el('span', null, w.limit > 0 ? 'of ' + tokens(w.limit) + ' counted tokens' : 'counted tokens')),
+      known ? progress(w.fraction, st) : null,
+      el('div', { class: 'budget-foot' }, el('span', null, w.source_label), known ? el('span', null, pct(w.fraction, 0) + ' used') : null),
+      el('div', { class: 'hint' }, w.outlook + ' · ' + tokens(w.burn_per_min) + ' tok/min · ' + money(w.cost_per_hour) + '/h (' + w.burn_basis + ')')
+    ];
+  }
+  function limitCard(p, asOf) {
+    var s = p.session, title = p.family + (p.plan ? ' · ' + p.plan : ''), kids = [];
+    if (s) {
+      var kind = s.source === 'none' ? '' : s.hits_before_reset ? 'warn' : 'good';
+      kids.push(el('div', { class: 'budget-top' },
+        el('div', null, el('div', { class: 'budget-name' }, 'Current block · ' + title),
+          el('div', { class: 'budget-period' }, clock(s.start) + '–' + clock(s.end) + (s.reported ? ' · reported by provider' : ' · estimated from request times'))),
+        pill(kind, duration(s.remaining_ms) + ' left as of ' + asOf)));
+      kids = kids.concat(windowRows(s));
+      kids.push(el('div', { class: 'hint' }, 'Projected ' + tokens(s.projected) + ' counted tokens by ' + clock(s.end)));
+    } else {
+      kids.push(el('div', { class: 'budget-top' },
+        el('div', null, el('div', { class: 'budget-name' }, 'Current block · ' + title), el('div', { class: 'budget-period' }, 'No active block as of ' + asOf)),
+        pill('', 'Idle')));
+    }
+    var w = p.weekly;
+    kids.push(el('div', { class: 'budget-period' }, 'Weekly · ' + (w.rolling ? 'rolling 7 days' :
+      'resets ' + stamp(w.end) + ' (' + duration(w.remaining_ms) + ' after ' + asOf + ')') + (w.reported ? ' · reported by provider' : '')));
+    kids = kids.concat(windowRows(w));
+    if (p.reported_at) kids.push(el('div', { class: 'hint' }, 'Provider report from ' + stamp(p.reported_at)));
+    return el('div', { class: 'card budget' }, kids);
+  }
+  function blockBars(container, plans) {
+    var pts = [], max = 0;
+    plans.forEach(function (p, k) {
+      p.history.forEach(function (b) { pts.push({ b: b, fam: p.family, color: k ? 'var(--s2)' : 'var(--s1)', label: stamp(b.start).split(',')[0] }); });
+    });
+    pts.sort(function (x, y) { return x.b.start - y.b.start; });
+    pts.forEach(function (p) { max = Math.max(max, p.b.counted); });
+    if (max === 0) return emptyChart(container, 'No blocks in the last 30 days.');
+    var fr = chartFrame(container, 220);
+    max = niceMax(max);
+    var s = svg('svg', { viewBox: '0 0 ' + fr.w + ' ' + fr.h, height: fr.h, role: 'img', 'aria-label': 'Counted tokens per 5 hour block' });
+    var g = svg('g');
+    s.appendChild(g);
+    axes(g, fr, max, tokens);
+    var plotW = fr.w - fr.l - fr.r, plotH = fr.h - fr.t - fr.b, slot = plotW / pts.length;
+    var bw = Math.max(1, Math.min(28, slot * 0.66));
+    var xOf = function (i) { return fr.l + slot * i + slot / 2; };
+    pts.forEach(function (p, i) {
+      var col = svg('g', { class: 'col' }), h = p.b.counted / max * plotH;
+      col.appendChild(svg('rect', { class: 'wash', x: fr.l + slot * i, y: fr.t, width: slot, height: plotH }));
+      if (h > 0) col.appendChild(svg('path', { class: 'seg-bar', d: topRounded(xOf(i) - bw / 2, fr.t + plotH - h, bw, h, 3), style: { fill: p.color } }));
+      var hit = svg('rect', { class: 'hit', x: fr.l + slot * i, y: fr.t, width: slot, height: plotH });
+      hit.addEventListener('mouseenter', function (e) {
+        showTip(e, p.fam + ' · ' + stamp(p.b.start) + '–' + clock(p.b.end) + (p.b.active ? ' (active)' : ''), [
+          { label: 'Counted', value: tokens(p.b.counted), color: p.color }, { label: 'All tokens', value: tokens(p.b.tokens) },
+          { label: 'Requests', value: thousands(p.b.requests) }, { label: 'API-equivalent', value: money(p.b.cost) }]);
+      });
+      hit.addEventListener('mousemove', moveTip);
+      hit.addEventListener('mouseleave', hideTip);
+      col.appendChild(hit);
+      g.appendChild(col);
+    });
+    xLabels(g, fr, pts, xOf);
+    clear(container).appendChild(s);
+  }
+  function renderLimits(root) {
+    var asOf = stamp(Date.parse(M.generated_at));
+    root.appendChild(sectionHead('Subscription windows', 'Snapshot as of ' + asOf + ' · monitoring only · not affected by filters'));
+    var grid = el('div', { class: 'grid budgets-grid' });
+    D.limits.forEach(function (p) { grid.appendChild(limitCard(p, asOf)); });
+    root.appendChild(grid);
+    var legend = el('div', { class: 'legend' }, D.limits.map(function (p, k) {
+      return el('span', null, el('i', { class: 'dot', style: { background: k ? 'var(--s2)' : 'var(--s1)' } }), p.family);
+    }));
+    var c = chartCard('span-12', 'Block history', 'Counted tokens per 5 hour block', legend);
+    root.appendChild(el('div', { class: 'grid charts', style: { 'margin-top': '14px' } }, c.card));
+    blockBars(c.body, D.limits);
   }
 
   function unpricedNote(list) {

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/ht2803-max/tokenmanager/internal/model"
 )
@@ -17,6 +18,19 @@ type codexUsage struct {
 	OutputTokens          int64 `json:"output_tokens"`
 	ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
 	TotalTokens           int64 `json:"total_tokens"`
+}
+
+type codexWindow struct {
+	UsedPercent   float64 `json:"used_percent"`
+	WindowMinutes int64   `json:"window_minutes"`
+	ResetsAt      float64 `json:"resets_at"`
+}
+
+type codexRateLimits struct {
+	LimitID   string       `json:"limit_id"`
+	Primary   *codexWindow `json:"primary"`
+	Secondary *codexWindow `json:"secondary"`
+	PlanType  string       `json:"plan_type"`
 }
 
 type codexLine struct {
@@ -34,8 +48,13 @@ type codexLine struct {
 			Last               *codexUsage `json:"last_token_usage"`
 			ModelContextWindow int64       `json:"model_context_window"`
 		} `json:"info"`
+		RateLimits *codexRateLimits `json:"rate_limits"`
 	} `json:"payload"`
 }
+
+// RateLimitsKey is the State key holding the file's latest provider-reported
+// rate-limit snapshot (a JSON model.RateLimits); the collector stores it.
+const RateLimitsKey = "rate_limits"
 
 var codexFileID = regexp.MustCompile(`([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$`)
 
@@ -49,6 +68,11 @@ var codexFileID = regexp.MustCompile(`([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 //
 // OpenAI reports cached tokens as a subset of input tokens; they are split
 // out here so Input never double counts the cache.
+//
+// token_count events also carry `rate_limits` (Codex 0.154+): the ChatGPT
+// plan's 5 hour (primary) and weekly (secondary) windows with used_percent
+// and resets_at. The latest "codex" snapshot is kept in State; snapshots for
+// other limit ids, or with both windows null, are ignored.
 func ParseCodex(r io.Reader, path string, st State) ([]model.Record, int64, error) {
 	if st["session"] == "" {
 		if m := codexFileID.FindStringSubmatch(filepath.Base(path)); m != nil {
@@ -78,9 +102,13 @@ func ParseCodex(r io.Reader, path string, st State) ([]model.Record, int64, erro
 			if p.Cwd != "" {
 				st["cwd"] = p.Cwd
 			}
-		case l.Type == "event_msg" && p.Type == "token_count" && p.Info != nil && p.Info.Last != nil:
+		case l.Type == "event_msg" && p.Type == "token_count":
 			ts, ok := ParseTime(l.Timestamp)
 			if !ok {
+				return
+			}
+			codexSnapshot(p.RateLimits, ts, st)
+			if p.Info == nil || p.Info.Last == nil {
 				return
 			}
 			u := p.Info.Last
@@ -115,4 +143,21 @@ func ParseCodex(r io.Reader, path string, st State) ([]model.Record, int64, erro
 		}
 	})
 	return out, n, err
+}
+
+func codexSnapshot(rl *codexRateLimits, ts time.Time, st State) {
+	if rl == nil || (rl.LimitID != "" && rl.LimitID != "codex") || (rl.Primary == nil && rl.Secondary == nil) {
+		return
+	}
+	win := func(w *codexWindow) *model.RateLimitWindow {
+		if w == nil || w.WindowMinutes <= 0 {
+			return nil
+		}
+		return &model.RateLimitWindow{UsedPercent: w.UsedPercent, WindowMinutes: w.WindowMinutes, ResetsAt: UnixAuto(w.ResetsAt)}
+	}
+	snap := model.RateLimits{Provider: firstNonEmpty(st["provider"], "openai"), Agent: "codex", Plan: rl.PlanType,
+		Observed: ts, Primary: win(rl.Primary), Secondary: win(rl.Secondary)}
+	if b, err := json.Marshal(snap); err == nil {
+		st[RateLimitsKey] = string(b)
+	}
 }

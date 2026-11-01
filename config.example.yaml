@@ -43,6 +43,27 @@ budgets:
     # opus: {monthly: 60}
   thresholds: [0.5, 0.8, 1.0]   # alert at 50%, 80%, 100%
 
+# Subscription plans (Claude Pro/Max, ChatGPT Plus/Pro): 5 hour blocks and a
+# weekly window. Every limit shown names its source: reported (Codex
+# rate_limits) > configured here > personal max (estimated from your largest
+# recent block) > none. Anthropic does not publish token limits, so leave
+# session_tokens / weekly_tokens at 0 unless you know your own numbers.
+plans:
+  anthropic:
+    plan: max-5x              # label only
+    session_tokens: 0         # counted tokens per 5h block (0 = not configured)
+    weekly_tokens: 0
+    weekly_reset: "mon 09:00" # local time; empty = rolling 7 days
+    # session_hours: 5        # block length
+    # floor_to_hour: true     # block starts are floored to the hour
+    # agents: [claude-code]   # agents billed to this plan
+  openai:
+    plan: plus                # Codex reports its own windows; these are fallbacks
+    # agents: [codex]
+  count: [input, output]      # also: cache_read, cache_write
+  # burn_window: 15m          # burn rate looks back this far
+  # alerts: false             # daemon notifications at budgets.thresholds
+
 notifications:
   enabled: true   # desktop alerts from the daemon (macOS / Linux notify-send)
 

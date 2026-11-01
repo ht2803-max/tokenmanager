@@ -72,6 +72,7 @@ takes a few milliseconds.
 | Key | Action |
 |---|---|
 | `1`–`9`, `←/→` | Overview, Usage, Agents, Sessions, Projects, Models, Optimize, Budgets, Settings |
+| `0` | Limits: current 5h block, weekly window, recent blocks ([Subscription plans](#subscription-plans)) |
 | `j/k`, `↑/↓`, `pgup/pgdn`, `g/G` | move in lists |
 | `tab` | switch panel (Overview), toggle the detail pane elsewhere |
 | `enter` / `esc` | open / close details |
@@ -95,9 +96,10 @@ updates live while you work. It also rescans slowly as a safety net.
 | `costs` | cost split by input / output / cache read / cache write; month projection |
 | `optimize` | 30-day analysis with estimated savings |
 | `budget`, `budget set monthly 100 [--for agent:claude-code]`, `budget rm …` | budgets |
+| `limits [-n 10]` (alias `blocks`) | subscription windows: current 5h block, burn rate, projection, weekly window, recent blocks |
 | `watch` | live stream of new requests with running cost |
 | `export [-f json\|csv] [-o file]` | per-request records |
-| `daemon start\|stop\|status\|run` | background collector + budget alerts |
+| `daemon start\|stop\|status\|run` | background collector + budget and window alerts |
 | `scan [--rebuild]` | ingest now / rebuild the database |
 | `config`, `config init`, `config path` | configuration |
 | `web [-o file] [--open] [--force]` | standalone HTML dashboard ([Browser Dashboard](#browser-dashboard)) |
@@ -134,9 +136,10 @@ matcher, a read mode and a parser that returns `model.Record`s) and a parser in
 
 ## Costs
 
-Costs are **estimates at public API list prices**. If you are on a
-subscription (Claude Pro/Max, ChatGPT Plus/Pro), read them as the API-equivalent
-value of your usage, not as your bill. Anthropic prices are built in (Claude 5
+Costs are **estimates at public API list prices**. On a subscription they are
+the API-equivalent value of your usage, not your bill; see
+[Subscription plans](#subscription-plans) for the limits that actually apply.
+Anthropic prices are built in (Claude 5
 family back to Claude 3.5 Haiku), including cache read/write rates, Haiku 5.5's
 long-prompt tier and fast mode. OpenAI prices are built in from OpenAI's table
 (GPT-6 and GPT-5.x families back to GPT-3.5 Turbo, plus o1/o3/o4-mini),
@@ -164,6 +167,40 @@ and the month-end projection. The daemon sends one desktop notification per
 threshold (default 50/80/100%) per period, via macOS Notification Center or
 `notify-send`. Budgets are **monitoring only**: TokenManager cannot stop an
 agent or change limits set on the provider side.
+
+## Subscription plans
+
+Claude Pro/Max and ChatGPT Plus/Pro aren't billed per token. They are limited
+by usage windows: a **5-hour block** that starts with the first request after
+the previous block ended, and a **weekly** cap. `tokenmanager limits`, TUI
+view `0`, a panel on the Overview and a card in the HTML export show:
+
+- the active block: start, elapsed and remaining time, tokens used
+- the **burn rate** over the last 15 minutes (or the block average when there
+  are too few requests), in tokens/min and API-equivalent cost/hour
+- the projected total at block end, and the time until the limit at that pace
+- the weekly window (rolling 7 days, or a fixed reset from config) and the
+  last blocks
+
+Block starts are floored to the hour. Only the plan's own agents count
+(Claude Code for `anthropic`, Codex for `openai`; an explicit `--agent`
+overrides that), and by default only input + output tokens count toward limits
+(`plans.count`).
+
+Every limit names its source, in this order of precedence:
+
+| Source | Meaning |
+|---|---|
+| `reported` | Codex writes the ChatGPT plan's 5h and weekly usage (`rate_limits`: `used_percent`, `window_minutes`, `resets_at`) into its rollout files. These boundaries and percentages are the provider's own and cover the whole account, including other machines. The token figure next to them is implied from local usage ÷ percent. A report is ignored once its window has reset. |
+| `configured` | `plans.<family>.session_tokens` / `weekly_tokens` from your config. |
+| `personal max` | **Estimated**: your largest completed block in the last 30 days (weekly: the largest of the previous four weeks). It says where you stand against your own history, not against the provider's limit. |
+| `no limit known` | Nothing to compare against; no ETA is shown. |
+
+Claude Code doesn't write limit or reset information locally, so Anthropic
+blocks are always estimated from request times and Anthropic doesn't publish
+token limits. Like budgets, limits are **monitoring only**. Set
+`plans.alerts: true` to have the daemon notify at `budgets.thresholds` once per
+threshold per window.
 
 ## Browser Dashboard
 
@@ -236,7 +273,7 @@ measure them (about 4 bytes per token) and are **never modified**.
 
 `~/.config/tokenmanager/config.yaml` (honors `XDG_CONFIG_HOME`; `TOKENMANAGER_CONFIG`
 overrides the path). See [`config.example.yaml`](config.example.yaml): enabled
-agents and path overrides, pricing, budgets, thresholds, refresh interval,
+agents and path overrides, pricing, budgets, thresholds, subscription plans, refresh interval,
 currency and conversion rate, retention, notifications and privacy. The
 database is stored at `~/.local/share/tokenmanager/usage.db` (honors `XDG_DATA_HOME`).
 
@@ -258,7 +295,7 @@ internal/parser       per-agent log parsers → model.Record
 internal/collector    incremental ingestion, fsnotify watcher
 internal/storage      SQLite (records, file offsets, alert state)
 internal/pricing      price table and cost calculation
-internal/analytics    aggregation, periods, series, projections
+internal/analytics    aggregation, periods, series, projections, subscription blocks
 internal/optimizer    findings and savings estimates
 internal/budget       budget evaluation
 internal/daemon       background collector, notifications

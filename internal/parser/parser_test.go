@@ -1,8 +1,12 @@
 package parser
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ht2803-max/tokenmanager/internal/model"
 )
 
 const claudeFixture = `{"type":"user","cwd":"/work/app","sessionId":"s1","timestamp":"2026-10-31T10:00:00Z","message":{"role":"user","content":"hi"}}
@@ -132,5 +136,43 @@ func TestParseContinue(t *testing.T) {
 	recs2, _, _ := ParseContinue(strings.NewReader(more), "t.jsonl", st)
 	if len(recs2) != 1 || recs2[0].Key == recs[0].Key {
 		t.Fatalf("expected distinct key, got %v / %v", recs2, recs)
+	}
+}
+
+// Fixture lines follow Codex 0.158.0-alpha.2.1 rollouts: rate_limits sits
+// next to info on token_count events, may be null, and a "premium" limit id
+// arrives with both windows null.
+const codexRateLimitsFixture = `{"timestamp":"2026-10-29T02:43:13.503Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":4329518},"last_token_usage":{"input_tokens":125673,"cached_input_tokens":124032,"output_tokens":122,"total_tokens":125795},"model_context_window":258400},"rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":14.0,"window_minutes":300,"resets_at":1793258808},"secondary":{"used_percent":2.0,"window_minutes":10080,"resets_at":1793845608},"credits":{"has_credits":false,"unlimited":false,"balance":"0"},"individual_limit":null,"spend_control_reached":null,"plan_type":"plus","rate_limit_reached_type":null}}}
+{"timestamp":"2026-10-29T02:44:00Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"limit_id":"premium","limit_name":null,"primary":null,"secondary":null,"credits":{"has_credits":false,"unlimited":false,"balance":"0"},"plan_type":"plus"}}}
+{"timestamp":"2026-10-29T02:45:00Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":null}}
+`
+
+func TestParseCodexRateLimits(t *testing.T) {
+	st := State{}
+	recs, _, err := ParseCodex(strings.NewReader(codexRateLimitsFixture), "rollout-x.jsonl", st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("rate_limits must not change record parsing: %d records", len(recs))
+	}
+	var rl model.RateLimits
+	if err := json.Unmarshal([]byte(st[RateLimitsKey]), &rl); err != nil {
+		t.Fatalf("no snapshot in state: %q", st[RateLimitsKey])
+	}
+	// The premium and null lines must not overwrite the codex snapshot.
+	want := time.Date(2026, 10, 29, 2, 43, 13, 503e6, time.UTC)
+	if !rl.Observed.Equal(want) || rl.Plan != "plus" || rl.Agent != "codex" || rl.Provider != "openai" {
+		t.Fatalf("snapshot metadata: %+v", rl)
+	}
+	p, s := rl.Primary, rl.Secondary
+	if p == nil || p.UsedPercent != 14 || p.WindowMinutes != 300 || p.ResetsAt.Unix() != 1793258808 {
+		t.Fatalf("primary: %+v", p)
+	}
+	if s == nil || s.UsedPercent != 2 || s.WindowMinutes != 10080 || s.ResetsAt.Unix() != 1793845608 {
+		t.Fatalf("secondary: %+v", s)
+	}
+	if !p.Start().Equal(p.ResetsAt.Add(-5*time.Hour)) || !p.Current(want) || p.Current(p.ResetsAt) {
+		t.Fatalf("window bounds: start %v current %v", p.Start(), p.Current(want))
 	}
 }

@@ -167,7 +167,7 @@ func TestEmptyDatabase(t *testing.T) {
 		t.Fatalf("empty db: %+v", d.Meta)
 	}
 	// Collections serialize as [] (never null) so the page can iterate them.
-	for _, k := range []string{`"facts":[]`, `"hourly":[]`, `"sessions":[]`, `"budgets":[]`, `"findings":[]`, `"days":[]`, `"models":[]`} {
+	for _, k := range []string{`"facts":[]`, `"hourly":[]`, `"sessions":[]`, `"budgets":[]`, `"limits":[]`, `"findings":[]`, `"days":[]`, `"models":[]`} {
 		if !strings.Contains(page, k) {
 			t.Errorf("empty export lacks %s", k)
 		}
@@ -431,5 +431,26 @@ func TestOpen(t *testing.T) {
 	startCommand = func(string, ...string) error { return errors.New("no browser") }
 	if err := Open("/tmp/d.html"); err == nil || !strings.Contains(err.Error(), "could not open a browser") {
 		t.Fatalf("failure not reported: %v", err)
+	}
+}
+
+func TestLimitsExport(t *testing.T) {
+	isolate(t)
+	e := engine(t, config.Default(),
+		rec("claude-code", "claude-opus-5-5", "s1", "/p", now.Add(-26*time.Hour), 10, 900, 0),
+		rec("claude-code", "claude-opus-5-5", "s2", "/p", now.Add(-5*time.Minute), 10, 300, 0))
+	d, page := build(t, e)
+	if len(d.Limits) != 1 || d.Limits[0].Family != "anthropic" {
+		t.Fatalf("limits: %+v", d.Limits)
+	}
+	l := d.Limits[0]
+	if l.Session == nil || l.Session.Counted != 310 || l.Session.Source != "personal-max" || l.Session.SourceLabel != "personal max · estimated" {
+		t.Fatalf("session: %+v", l.Session)
+	}
+	if l.Session.RemainingMs <= 0 || len(l.History) != 2 || !l.History[1].Active {
+		t.Fatalf("history oldest first with the active block last: %+v", l.History)
+	}
+	if !strings.Contains(page, `"limits":[{"family":"anthropic"`) {
+		t.Fatal("page does not embed limits")
 	}
 }

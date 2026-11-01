@@ -44,6 +44,7 @@ type Dashboard struct {
 	Models   []ModelInfo         `json:"models"`
 	Sessions []Session           `json:"sessions"`
 	Budgets  []BudgetStatus      `json:"budgets"`
+	Limits   []LimitPlan         `json:"limits"`
 	Findings []optimizer.Finding `json:"findings"`
 }
 
@@ -172,6 +173,64 @@ type BudgetStatus struct {
 	Level       float64 `json:"level"`
 }
 
+// LimitBlock is one analytics.Block. Times are unix ms.
+type LimitBlock struct {
+	Start    int64   `json:"start"`
+	End      int64   `json:"end"`
+	Active   bool    `json:"active"`
+	Reported bool    `json:"reported"`
+	Requests int64   `json:"requests"`
+	Counted  int64   `json:"counted"`
+	Tokens   int64   `json:"tokens"`
+	Cost     float64 `json:"cost"`
+}
+
+// LimitWindow is an analytics.Window with its labels precomputed, as of
+// Meta.GeneratedAt (the page is a snapshot and never recomputes them).
+type LimitWindow struct {
+	LimitBlock
+	Kind            string  `json:"kind"`
+	Rolling         bool    `json:"rolling"`
+	RemainingMs     int64   `json:"remaining_ms"`
+	BurnPerMin      float64 `json:"burn_per_min"`
+	CostPerHour     float64 `json:"cost_per_hour"`
+	BurnBasis       string  `json:"burn_basis"`
+	Projected       int64   `json:"projected"`
+	Limit           int64   `json:"limit"`
+	Source          string  `json:"source"`
+	SourceLabel     string  `json:"source_label"`
+	Fraction        float64 `json:"fraction"`
+	Outlook         string  `json:"outlook"`
+	HitsBeforeReset bool    `json:"hits_before_reset"`
+}
+
+// LimitPlan is an analytics.PlanReport.
+type LimitPlan struct {
+	Family     string       `json:"family"`
+	Plan       string       `json:"plan,omitempty"`
+	Agents     []string     `json:"agents"`
+	Session    *LimitWindow `json:"session"`
+	Weekly     LimitWindow  `json:"weekly"`
+	History    []LimitBlock `json:"history"` // oldest first
+	ReportedAt int64        `json:"reported_at,omitempty"`
+}
+
+// limitHistory caps the block history chart.
+const limitHistory = 40
+
+func limitBlock(b analytics.Block) LimitBlock {
+	return LimitBlock{b.Start.UnixMilli(), b.End.UnixMilli(), b.Active, b.Reported, b.Requests, b.Counted, b.Tokens(), money(b.Cost)}
+}
+
+func limitWindow(w *analytics.Window, now time.Time) LimitWindow {
+	return LimitWindow{
+		LimitBlock: limitBlock(w.Block), Kind: w.Kind, Rolling: w.Rolling, RemainingMs: w.Remaining(now).Milliseconds(),
+		BurnPerMin: math.Round(w.Burn.TokensPerMin), CostPerHour: money(w.Burn.CostPerHour), BurnBasis: w.Burn.Basis,
+		Projected: w.Projected, Limit: w.Limit.Tokens, Source: string(w.Limit.Source), SourceLabel: w.Limit.Label(),
+		Fraction: w.Limit.Fraction, Outlook: w.Outlook(now), HitsBeforeReset: w.HitsBeforeReset(now),
+	}
+}
+
 const dayFmt = "2006-01-02"
 
 // Build queries the database through the shared engines and assembles the
@@ -187,7 +246,7 @@ func Build(e *analytics.Engine, opt Options) (*Dashboard, error) {
 		return nil, err
 	}
 	b := &builder{hide: e.Cfg.Privacy.HideProjectPaths, idx: map[string]map[string]int{}}
-	d := &Dashboard{Facts: []Fact{}, Hourly: []Fact{}, Sessions: []Session{}, Budgets: []BudgetStatus{}, Findings: []optimizer.Finding{}}
+	d := &Dashboard{Facts: []Fact{}, Hourly: []Fact{}, Sessions: []Session{}, Budgets: []BudgetStatus{}, Limits: []LimitPlan{}, Findings: []optimizer.Finding{}}
 
 	// Facts: fold records into (bucket, agent, project, model) aggregates
 	// using the engine's own Add so costs come from the pricing table.
@@ -264,6 +323,25 @@ func Build(e *analytics.Engine, opt Options) (*Dashboard, error) {
 			bs.Name = strings.TrimSuffix(bs.Name, s.Target) + bs.Target
 		}
 		d.Budgets = append(d.Budgets, bs)
+	}
+
+	reps, err := e.Limits(opt.Filter)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range reps {
+		lp := LimitPlan{Family: r.Family, Plan: r.Plan, Agents: r.Agents, Weekly: limitWindow(&r.Weekly, now), History: []LimitBlock{}}
+		if r.Session != nil {
+			w := limitWindow(r.Session, now)
+			lp.Session = &w
+		}
+		for i := min(len(r.History), limitHistory) - 1; i >= 0; i-- {
+			lp.History = append(lp.History, limitBlock(r.History[i]))
+		}
+		if r.Snapshot != nil {
+			lp.ReportedAt = r.Snapshot.Observed.UnixMilli()
+		}
+		d.Limits = append(d.Limits, lp)
 	}
 
 	fs, err := optimizer.Analyze(e, opt.Filter)

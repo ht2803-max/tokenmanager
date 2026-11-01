@@ -38,16 +38,24 @@ func fixtureModel(t *testing.T) *Model {
 	var recs []model.Record
 	agentsList := []string{"claude-code", "codex", "aider"}
 	models := []string{"claude-opus-5-5", "gpt-5.6-terra", "claude-sonnet-4-5"}
+	providers := []string{"anthropic", "openai", "anthropic"}
 	for i := 0; i < 400; i++ {
 		a := i % 3
 		recs = append(recs, model.Record{
-			Key: fmt.Sprint("k", i), Agent: agentsList[a], Provider: "p", Model: models[a],
+			Key: fmt.Sprint("k", i), Agent: agentsList[a], Provider: providers[a], Model: models[a],
 			SessionID: fmt.Sprint("session-", i/20), Project: fmt.Sprintf("/Users/me/code/a-rather-long-project-name-%d/sub/dir", i%7),
 			Timestamp: now.Add(-time.Duration(i) * 97 * time.Minute), Input: int64(100 + i), Output: int64(300 + i*3),
 			CacheRead: int64(50_000 + i*900), CacheWrite5m: int64(2000 + i), Accuracy: model.Actual,
 		})
 	}
 	if _, err := db.Insert(recs); err != nil {
+		t.Fatal(err)
+	}
+	// A current Codex snapshot so the Limits view renders reported windows.
+	err = db.SaveRateLimits(model.RateLimits{Provider: "openai", Agent: "codex", Plan: "plus", Observed: now,
+		Primary:   &model.RateLimitWindow{UsedPercent: 42, WindowMinutes: 300, ResetsAt: now.Add(2 * time.Hour)},
+		Secondary: &model.RateLimitWindow{UsedPercent: 12, WindowMinutes: 10080, ResetsAt: now.Add(72 * time.Hour)}})
+	if err != nil {
 		t.Fatal(err)
 	}
 	m := &Model{cfg: cfg, db: db, eng: analytics.New(cfg, db), search: textinput.New(), periodIdx: 3}
@@ -111,6 +119,14 @@ func TestKeyboardNavigation(t *testing.T) {
 		t.Fatalf("search = %q, %d results", m.search.Value(), len(m.filteredSessions()))
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	key("0")
+	if m.view != vLimits {
+		t.Fatalf("0 should open Limits, view = %d", m.view)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if m.view != vOverview {
+		t.Fatalf("→ from Limits should wrap to Overview, view = %d", m.view)
+	}
 	key("?")
 	if !m.help {
 		t.Fatal("? should open help")

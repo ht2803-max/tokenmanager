@@ -51,3 +51,31 @@ func (r Record) CacheWrite() int64 { return r.CacheWrite5m + r.CacheWrite1h }
 
 // Total is every token billed for the request.
 func (r Record) Total() int64 { return r.PromptTokens() + r.Output }
+
+// RateLimitWindow is one provider-reported subscription usage window.
+type RateLimitWindow struct {
+	UsedPercent   float64   `json:"used_percent"`
+	WindowMinutes int64     `json:"window_minutes"`
+	ResetsAt      time.Time `json:"resets_at"`
+}
+
+// Current reports whether the window has not reset yet at now.
+func (w *RateLimitWindow) Current(now time.Time) bool {
+	return w != nil && w.WindowMinutes > 0 && now.Before(w.ResetsAt)
+}
+
+// Start is when the window began (ResetsAt minus its length).
+func (w *RateLimitWindow) Start() time.Time {
+	return w.ResetsAt.Add(-time.Duration(w.WindowMinutes) * time.Minute)
+}
+
+// RateLimits is the latest provider-reported snapshot of a subscription's
+// usage windows (today only Codex writes one: 5 hour primary, weekly secondary).
+type RateLimits struct {
+	Provider  string           `json:"provider"`
+	Agent     string           `json:"agent"`
+	Plan      string           `json:"plan,omitempty"`
+	Observed  time.Time        `json:"observed"`
+	Primary   *RateLimitWindow `json:"primary,omitempty"`
+	Secondary *RateLimitWindow `json:"secondary,omitempty"`
+}
