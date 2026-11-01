@@ -58,6 +58,71 @@ type Privacy struct {
 	HideProjectPaths bool `yaml:"hide_project_paths"`
 }
 
+// Plan describes one provider family's subscription windows. Zero values
+// fall back to the defaults in Plans.For.
+type Plan struct {
+	Plan          string   `yaml:"plan,omitempty"`           // label only, e.g. "max-5x"
+	SessionTokens int64    `yaml:"session_tokens,omitempty"` // 0 = not configured
+	WeeklyTokens  int64    `yaml:"weekly_tokens,omitempty"`
+	WeeklyReset   string   `yaml:"weekly_reset,omitempty"`  // "mon 09:00"; empty = rolling 7 days
+	SessionHours  float64  `yaml:"session_hours,omitempty"` // default 5
+	FloorToHour   *bool    `yaml:"floor_to_hour,omitempty"` // default true
+	Agents        []string `yaml:"agents,omitempty"`        // agents billed to this plan
+}
+
+// Plans configures subscription usage windows (Claude Pro/Max, ChatGPT
+// Plus/Pro). Like budgets they are monitoring only.
+type Plans struct {
+	Anthropic Plan     `yaml:"anthropic,omitempty"`
+	OpenAI    Plan     `yaml:"openai,omitempty"`
+	Count     []string `yaml:"count,omitempty"`       // input, output, cache_read, cache_write
+	BurnRate  Duration `yaml:"burn_window,omitempty"` // default 15m
+	Alerts    bool     `yaml:"alerts,omitempty"`      // daemon notifications at budgets.thresholds
+}
+
+// PlanFamilies are the provider families that have subscription plans.
+var PlanFamilies = []string{"anthropic", "openai"}
+
+var defaultPlanAgents = map[string][]string{"anthropic": {"claude-code"}, "openai": {"codex"}}
+
+// For returns the plan for a provider family with defaults applied.
+func (p Plans) For(family string) Plan {
+	var pl Plan
+	switch family {
+	case "anthropic":
+		pl = p.Anthropic
+	case "openai":
+		pl = p.OpenAI
+	}
+	if pl.SessionHours <= 0 {
+		pl.SessionHours = 5
+	}
+	if pl.FloorToHour == nil {
+		t := true
+		pl.FloorToHour = &t
+	}
+	if len(pl.Agents) == 0 {
+		pl.Agents = defaultPlanAgents[family]
+	}
+	return pl
+}
+
+// CountFields is the token fields that count toward limits (default input+output).
+func (p Plans) CountFields() []string {
+	if len(p.Count) == 0 {
+		return []string{"input", "output"}
+	}
+	return p.Count
+}
+
+// BurnWindow is how far back the burn rate looks (default 15 minutes).
+func (p Plans) BurnWindow() time.Duration {
+	if p.BurnRate.Duration <= 0 {
+		return 15 * time.Minute
+	}
+	return p.BurnRate.Duration
+}
+
 // Config is the full user configuration.
 type Config struct {
 	Currency        string                 `yaml:"currency"`
@@ -67,6 +132,7 @@ type Config struct {
 	Agents          map[string]AgentConfig `yaml:"agents"`
 	Pricing         map[string]ModelPrice  `yaml:"pricing,omitempty"` // overrides / additions
 	Budgets         Budgets                `yaml:"budgets"`
+	Plans           Plans                  `yaml:"plans,omitempty"`
 	Notifications   Notifications          `yaml:"notifications"`
 	Privacy         Privacy                `yaml:"privacy"`
 	DatabasePath    string                 `yaml:"database_path,omitempty"`
@@ -205,4 +271,5 @@ const header = `# TokenManager configuration
 #     my-local-model: {input: 1.25, output: 10}
 # budgets.per_agent / per_project / per_model take daily/weekly/monthly limits.
 # Budgets are monitoring only; they never enforce provider-side limits.
+# plans.anthropic / plans.openai describe subscription windows (see config.example.yaml).
 `

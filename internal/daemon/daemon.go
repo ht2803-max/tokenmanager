@@ -122,6 +122,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	res := coll.Scan()
 	log.Info("daemon started", "files", res.Files, "new_requests", len(res.Added))
 	checkBudgets(eng, db, cfg, log)
+	checkBlocks(eng, db, cfg, log)
 
 	ch := make(chan []model.Record, 16)
 	errc := make(chan error, 1)
@@ -138,8 +139,10 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		case recs := <-ch:
 			log.Info("ingested", "requests", len(recs))
 			checkBudgets(eng, db, cfg, log)
+			checkBlocks(eng, db, cfg, log)
 		case <-tick.C:
 			checkBudgets(eng, db, cfg, log)
+			checkBlocks(eng, db, cfg, log)
 		}
 	}
 }
@@ -167,6 +170,51 @@ func checkBudgets(eng *analytics.Engine, db *storage.DB, cfg *config.Config, log
 		if cfg.Notifications.Enabled {
 			if err := Notify("TokenManager", msg); err != nil {
 				log.Warn("notification failed", "err", err)
+			}
+		}
+	}
+}
+
+// checkBlocks notifies (when plans.alerts is set) once per threshold per
+// subscription window, using budgets.thresholds. State is keyed by the
+// window start, so each new block starts fresh.
+func checkBlocks(eng *analytics.Engine, db *storage.DB, cfg *config.Config, log *slog.Logger) {
+	if !cfg.Plans.Alerts {
+		return
+	}
+	reps, err := eng.Limits(storage.Filter{})
+	if err != nil {
+		log.Warn("limits evaluation failed", "err", err)
+		return
+	}
+	for _, r := range reps {
+		ws := []*analytics.Window{r.Session, &r.Weekly}
+		for _, w := range ws {
+			if w == nil || w.Rolling || w.Limit.Source == analytics.SourceNone {
+				continue
+			}
+			lvl := 0.0
+			for _, t := range cfg.Budgets.Thresholds {
+				if w.Limit.Fraction >= t && t > lvl {
+					lvl = t
+				}
+			}
+			if lvl == 0 {
+				continue
+			}
+			key := "alert:block|" + r.Family + "|" + w.Kind + "|" + w.Start.UTC().Format(time.RFC3339)
+			prev, _ := strconv.ParseFloat(db.Get(key), 64)
+			if lvl <= prev {
+				continue
+			}
+			_ = db.Set(key, strconv.FormatFloat(lvl, 'f', 2, 64))
+			msg := fmt.Sprintf("%s %s window at %.0f%% (%s), resets in %s", r.Family, w.Kind, w.Limit.Fraction*100,
+				w.Limit.Label(), format.Duration(w.Remaining(eng.Now())))
+			log.Warn("window alert", "family", r.Family, "window", w.Kind, "usage", w.Limit.Fraction, "source", w.Limit.Source)
+			if cfg.Notifications.Enabled {
+				if err := Notify("TokenManager", msg); err != nil {
+					log.Warn("notification failed", "err", err)
+				}
 			}
 		}
 	}

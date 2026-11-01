@@ -20,7 +20,7 @@ import (
 	"github.com/ht2803-max/tokenmanager/internal/storage"
 )
 
-// Views, in keyboard order 1-9.
+// Views, in keyboard order 1-9 then 0.
 const (
 	vOverview = iota
 	vUsage
@@ -31,9 +31,10 @@ const (
 	vOptimize
 	vBudgets
 	vSettings
+	vLimits
 )
 
-var viewNames = []string{"Overview", "Usage", "Agents", "Sessions", "Projects", "Models", "Optimize", "Budgets", "Settings"}
+var viewNames = []string{"Overview", "Usage", "Agents", "Sessions", "Projects", "Models", "Optimize", "Budgets", "Settings", "Limits"}
 
 // snapshot is everything the views render, computed off the UI goroutine.
 type snapshot struct {
@@ -51,6 +52,7 @@ type snapshot struct {
 	latest     []model.Record
 	agentSt    []agents.Status
 	budgets    []budget.Status
+	limits     []analytics.PlanReport
 	findings   []optimizer.Finding
 	optimized  bool
 	daemonPID  int
@@ -79,7 +81,7 @@ type Model struct {
 	data      *snapshot
 	loading   bool
 	dirty     bool // new data arrived while loading
-	cursor    [9]int
+	cursor    [10]int
 	focus     int // panel focus within a view (Tab)
 	detail    bool
 	help      bool
@@ -173,6 +175,7 @@ func (m *Model) load() tea.Cmd {
 			s.agentSt = append(s.agentSt, agents.Discover(eng.Cfg, a))
 		}
 		s.budgets, _ = budget.Evaluate(eng)
+		s.limits, _ = eng.Limits(f)
 		if withOpt {
 			s.findings, _ = optimizer.Analyze(eng, f)
 			s.optimized = true
@@ -259,6 +262,8 @@ func (m *Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.help = true
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		return m.switchView(int(s[0] - '1'))
+	case "0":
+		return m.switchView(vLimits)
 	case "right", "l":
 		return m.switchView((m.view + 1) % len(viewNames))
 	case "left", "h":
@@ -383,6 +388,8 @@ func (m *Model) listLen() int {
 		return len(m.data.findings)
 	case vBudgets:
 		return len(m.data.budgets)
+	case vLimits:
+		return len(m.limitRows())
 	}
 	return 0
 }

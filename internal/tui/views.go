@@ -54,6 +54,8 @@ func (m *Model) View() string {
 			body = m.budgetsView(bodyH)
 		case vSettings:
 			body = m.settingsView(bodyH)
+		case vLimits:
+			body = m.limitsView(bodyH)
 		}
 	}
 	body = lipgloss.NewStyle().Height(bodyH).MaxHeight(bodyH).Render(body)
@@ -66,9 +68,9 @@ func (m *Model) header() string {
 	logo := stLogo.Render("◆ TokenManager")
 	var tabs []string
 	for i, n := range viewNames {
-		label := fmt.Sprintf("%d %s", i+1, n)
+		label := fmt.Sprintf("%d %s", (i+1)%10, n)
 		if m.w < 120 {
-			label = fmt.Sprintf("%d %s", i+1, n[:min(len(n), 4)])
+			label = fmt.Sprintf("%d %s", (i+1)%10, n[:min(len(n), 4)])
 		}
 		if i == m.view {
 			tabs = append(tabs, stTabOn.Render(label))
@@ -99,7 +101,7 @@ func (m *Model) footer() string {
 	if m.searching {
 		return fit(" "+m.search.View(), m.w)
 	}
-	keys := []string{"1-9 views", "j/k move", "tab panel", "enter details", "f period", "/ search", "r refresh", "? help", "q quit"}
+	keys := []string{"0-9 views", "j/k move", "tab panel", "enter details", "f period", "/ search", "r refresh", "? help", "q quit"}
 	var parts []string
 	for _, k := range keys {
 		sp := strings.SplitN(k, " ", 2)
@@ -123,6 +125,7 @@ func (m *Model) footer() string {
 func (m *Model) helpView(h int) string {
 	rows := [][2]string{
 		{"1-9", "jump to view (Overview, Usage, Agents, Sessions, Projects, Models, Optimize, Budgets, Settings)"},
+		{"0", "Limits: subscription blocks (5h session, weekly window, recent blocks)"},
 		{"←/→  h/l", "previous / next view"},
 		{"j/k  ↑/↓", "move in lists · pgup/pgdn page · g/G top/bottom"},
 		{"tab", "switch panel (Overview) · toggle detail pane"},
@@ -364,6 +367,10 @@ func (m *Model) overview(h int) string {
 	rest := h - lipgloss.Height(top)
 	if rest < 8 {
 		return top
+	}
+	if n := len(d.limits); n > 0 && rest-(n+3) >= 12 {
+		top = lipgloss.JoinVertical(lipgloss.Left, top, m.blockPanel(w))
+		rest -= n + 3
 	}
 	midH := rest / 2
 	botH := rest - midH

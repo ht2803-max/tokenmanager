@@ -51,6 +51,14 @@ type Result struct {
 // size and mtime are unchanged are skipped without being opened.
 func (c *Collector) Scan() Result {
 	var res Result
+	// One-time re-read of files ingested before a parser learned new fields
+	// (Codex rate_limits). Dedup keys keep the re-read idempotent.
+	reparse := map[string]bool{}
+	for agent, flag := range reparseOnce {
+		if c.db.Get(flag) == "" {
+			reparse[agent] = true
+		}
+	}
 	for _, a := range agents.All() {
 		if a.Parse == nil {
 			continue
@@ -61,7 +69,7 @@ func (c *Collector) Scan() Result {
 		}
 		for _, f := range st.Files {
 			res.Files++
-			added, changed, err := c.ingest(a, f)
+			added, changed, err := c.ingest(a, f, reparse[a.Name])
 			if err != nil {
 				res.Errors = append(res.Errors, err)
 				c.log.Warn("ingest failed", "file", f, "err", err)
@@ -72,13 +80,21 @@ func (c *Collector) Scan() Result {
 			res.Added = append(res.Added, added...)
 		}
 	}
+	for agent := range reparse {
+		if len(res.Errors) == 0 {
+			_ = c.db.Set(reparseOnce[agent], "1")
+		}
+	}
 	if c.cfg.RetentionDays > 0 {
 		_, _ = c.db.Prune(time.Now().AddDate(0, 0, -c.cfg.RetentionDays))
 	}
 	return res
 }
 
-func (c *Collector) ingest(a *agents.Adapter, path string) ([]model.Record, bool, error) {
+// reparseOnce maps an agent to the kv flag recording its one-time re-read.
+var reparseOnce = map[string]string{"codex": "reparsed:codex_rate_limits"}
+
+func (c *Collector) ingest(a *agents.Adapter, path string, force bool) ([]model.Record, bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	info, err := os.Stat(path)
@@ -90,7 +106,7 @@ func (c *Collector) ingest(a *agents.Adapter, path string) ([]model.Record, bool
 		return nil, false, err
 	}
 	size, mtime := info.Size(), info.ModTime().UnixNano()
-	if fs.Size == size && fs.MTime == mtime {
+	if fs.Size == size && fs.MTime == mtime && !force {
 		return nil, false, nil
 	}
 	state := parser.State{}
@@ -98,7 +114,7 @@ func (c *Collector) ingest(a *agents.Adapter, path string) ([]model.Record, bool
 		_ = json.Unmarshal([]byte(fs.State), &state)
 	}
 	offset := fs.Offset
-	if a.Mode == agents.Whole || size < offset {
+	if a.Mode == agents.Whole || size < offset || force {
 		// Rewritten or truncated: start over. Dedup keys keep this idempotent.
 		offset = 0
 		if a.Mode == agents.Append {
@@ -124,6 +140,14 @@ func (c *Collector) ingest(a *agents.Adapter, path string) ([]model.Record, bool
 	added, err := c.db.Insert(recs)
 	if err != nil {
 		return nil, true, err
+	}
+	if v := state[parser.RateLimitsKey]; v != "" {
+		var rl model.RateLimits
+		if json.Unmarshal([]byte(v), &rl) == nil {
+			if err := c.db.SaveRateLimits(rl); err != nil {
+				c.log.Warn("saving rate limits failed", "err", err)
+			}
+		}
 	}
 	if perr != nil {
 		// Keep what was parsed but do not advance past an unreadable file.
@@ -231,7 +255,7 @@ func (c *Collector) Watch(ctx context.Context, out chan<- []model.Record) error 
 		case <-debounce.C:
 			var batch []model.Record
 			for p, a := range pending {
-				added, _, err := c.ingest(a, p)
+				added, _, err := c.ingest(a, p, false)
 				if err != nil {
 					c.log.Warn("ingest failed", "file", p, "err", err)
 				}

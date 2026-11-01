@@ -6,6 +6,7 @@ package storage
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -205,6 +206,29 @@ func (d *DB) Get(k string) string {
 func (d *DB) Set(k, v string) error {
 	_, err := d.db.Exec(`INSERT INTO kv(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, k, v)
 	return err
+}
+
+// RateLimits returns the latest stored snapshot for a provider.
+func (d *DB) RateLimits(provider string) (model.RateLimits, bool) {
+	var rl model.RateLimits
+	v := d.Get("ratelimits:" + provider)
+	if v == "" || json.Unmarshal([]byte(v), &rl) != nil {
+		return rl, false
+	}
+	return rl, true
+}
+
+// SaveRateLimits stores a snapshot unless a newer one is already stored
+// (files are not ingested in chronological order).
+func (d *DB) SaveRateLimits(rl model.RateLimits) error {
+	if old, ok := d.RateLimits(rl.Provider); ok && !rl.Observed.After(old.Observed) {
+		return nil
+	}
+	b, err := json.Marshal(rl)
+	if err != nil {
+		return err
+	}
+	return d.Set("ratelimits:"+rl.Provider, string(b))
 }
 
 // Prune deletes records older than the cutoff and returns how many.
