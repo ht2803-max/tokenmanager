@@ -1,0 +1,14 @@
+# User service (Linux):
+#   mkdir -p ~/.config/systemd/user
+#   cp packaging/systemd/tokenmanager.service ~/.config/systemd/user/
+#   systemctl --user enable --now tokenmanager
+[Unit]
+Description=TokenManager usage collector
+
+[Service]
+ExecStart=%h/go/bin/tokenmanager daemon run
+Restart=on-failure
+Nice=10
+
+[Install]
+WantedBy=default.target

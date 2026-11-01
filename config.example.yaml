@@ -1,0 +1,52 @@
+# TokenManager configuration — copy to ~/.config/tokenmanager/config.yaml
+# (or run `tokenmanager config init`). Every field is optional.
+
+currency: USD          # display currency
+currency_rate: 1       # multiplier applied to USD list prices (e.g. 0.92 for EUR)
+refresh_interval: 5s   # TUI refresh cadence; live updates use file events
+retention_days: 0      # delete records older than N days (0 = keep forever)
+
+agents:
+  claude-code:
+    enabled: true
+    # paths: ["~/.claude/projects"]        # override auto-detection
+  codex:
+    enabled: true
+    # paths: ["~/.codex/sessions", "~/.codex/archived_sessions"]
+  gemini-cli:
+    enabled: true
+  aider:
+    enabled: true
+    # Aider writes its log inside each project; list the projects here.
+    # paths: ["~/code/my-app/.aider.chat.history.md", "~/code"]
+  continue:
+    enabled: true
+  cursor:
+    enabled: true      # detection only: Cursor keeps usage server-side
+
+# Prices in USD per million tokens. Cache prices default to 0.1x (read),
+# 1.25x (5 minute write) and 2x (1 hour write) of the input price.
+# Models without a price show "n/a" instead of a guessed cost.
+pricing:
+  # gpt-5.6-terra: {input: 1.25, output: 10, cache_read: 0.125}
+
+budgets:
+  global:
+    monthly: 100
+    # daily: 10
+    # weekly: 30
+  per_agent:
+    # claude-code: {daily: 15}
+  per_project:   # substring of the project path
+    # my-app: {monthly: 40}
+  per_model:     # substring of the model id
+    # opus: {monthly: 60}
+  thresholds: [0.5, 0.8, 1.0]   # alert at 50%, 80%, 100%
+
+notifications:
+  enabled: true   # desktop alerts from the daemon (macOS / Linux notify-send)
+
+privacy:
+  hide_project_paths: false   # store only the last path element of projects
+
+# database_path: ~/.local/share/tokenmanager/usage.db
