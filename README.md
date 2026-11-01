@@ -19,7 +19,7 @@ UI, needs no account, and sends nothing off your machine.
 Requires Go 1.27.3 or newer. An older Go 1.21+ install downloads the newer toolchain automatically.
 
 ```bash
-go install github.com/ht2803-max/tokenmanager/cmd/tokenmanager@latest
+go install github.com/ht2803-max/tokenmanager/cmd/tokenmanager@main
 ```
 
 This puts `tokenmanager` in `$(go env GOPATH)/bin` (usually `~/go/bin`). If the
