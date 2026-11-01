@@ -58,6 +58,7 @@ brew install ht2803-max/tap/tokenmanager
 tokenmanager            # interactive dashboard
 tokenmanager today      # one-shot summary
 tokenmanager optimize   # recommendations
+tokenmanager web --open # browser dashboard (static HTML file)
 ```
 
 Agents are found automatically. Each command first ingests new data
@@ -98,6 +99,7 @@ updates live while you work. It also rescans slowly as a safety net.
 | `daemon start\|stop\|status\|run` | background collector + budget alerts |
 | `scan [--rebuild]` | ingest now / rebuild the database |
 | `config`, `config init`, `config path` | configuration |
+| `web [-o file] [--open] [--force]` | standalone HTML dashboard ([Browser Dashboard](#browser-dashboard)) |
 
 Global flags: `--json`, `--csv`, `--today`, `--week`, `--month`, `--all`,
 `--agent`, `--project`, `--model` (substring), `--no-scan`.
@@ -157,6 +159,52 @@ threshold (default 50/80/100%) per period, via macOS Notification Center or
 `notify-send`. Budgets are **monitoring only**: TokenManager cannot stop an
 agent or change limits set on the provider side.
 
+## Browser Dashboard
+
+The terminal dashboard is still the main interface. If you'd rather look at
+your usage in a browser, TokenManager can also write the same data to one
+standalone HTML file.
+
+```bash
+tokenmanager web                          # writes ~/.local/share/tokenmanager/dashboard.html
+tokenmanager web --output ./dashboard.html
+tokenmanager web --open                   # write it, then open it in the default browser
+tokenmanager web --no-scan                # use the database as is, skip ingestion
+```
+
+- **Output location.** Without `--output` the file goes to
+  `~/.local/share/tokenmanager/dashboard.html` (this follows `XDG_DATA_HOME`) and
+  is replaced each time. If `--output` names a file that already exists, you're
+  asked before it's overwritten; with no terminal attached the command stops.
+  Pass `--force` to overwrite without asking. If `--output` names a directory,
+  `dashboard.html` is written inside it.
+- **What's inside.** Overview cards (today, week, month, projected month,
+  monthly budget), daily token and spend charts, the input/output/cache mix,
+  spend by agent, plus agents, sessions, projects, models, optimization
+  findings and budgets. You can filter by date range (today, 7 days, 30 days,
+  all time), agent, project and model, sort tables, expand sessions, hover
+  over charts, and switch between dark and light themes.
+- **Works offline.** The page is a single file with its CSS, JavaScript and
+  data embedded. It loads nothing from the internet, starts no server, opens no
+  port and sends no telemetry. A Content-Security-Policy in the file blocks
+  network requests. You can double-click the file to open it.
+- **Same numbers as the TUI.** Before writing the page, the command runs the
+  normal incremental scan (unless you pass `--no-scan`). All totals, costs,
+  budgets and findings come from the same analytics, pricing, budget and
+  optimizer packages the CLI uses; the page itself only adds up and draws the
+  pre-computed values. `--agent`, `--project` and `--model` limit what goes
+  into the export.
+- **A snapshot, not live.** The page doesn't refresh itself when new usage is
+  collected. Run `tokenmanager web` again to regenerate it, then reload the
+  page in your browser.
+- **Treat it as private.** The file holds aggregated usage only: token counts,
+  costs, model names, session IDs and project names. It never contains
+  prompts, responses or code. Anyone who has the file can still read that
+  data, so it's written with user-only permissions. Project paths are shown
+  relative to `~`; set `privacy.hide_project_paths: true` to export only the
+  last path element. The page lists at most the 1,000 most recent sessions;
+  every total and chart still covers all usage.
+
 ## Daemon
 
 `tokenmanager daemon start` runs the collector in the background
@@ -208,12 +256,13 @@ internal/analytics    aggregation, periods, series, projections
 internal/optimizer    findings and savings estimates
 internal/budget       budget evaluation
 internal/daemon       background collector, notifications
+internal/web          standalone HTML dashboard export (embedded assets)
 internal/config       YAML configuration
 internal/format       number formatting and Unicode charts
 ```
 
 The usage engine (collector, storage, analytics) doesn't depend on the UI, so
-every CLI command, the TUI and the daemon share it.
+every CLI command, the TUI, the daemon and the HTML export share it.
 
 ## Development
 

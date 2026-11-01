@@ -14,12 +14,17 @@ var Currency = "USD"
 
 var symbols = map[string]string{"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "INR": "₹", "CAD": "C$", "AUD": "A$", "CHF": "CHF "}
 
+// Symbol is the display prefix for the active currency ("$", "€", "SEK ").
+func Symbol() string {
+	if sym, ok := symbols[strings.ToUpper(Currency)]; ok {
+		return sym
+	}
+	return Currency + " "
+}
+
 // Money formats an amount in the active currency.
 func Money(v float64) string {
-	sym, ok := symbols[strings.ToUpper(Currency)]
-	if !ok {
-		sym = Currency + " "
-	}
+	sym := Symbol()
 	if v < 0 {
 		return "-" + Money(-v)
 	}
