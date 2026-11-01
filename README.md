@@ -137,8 +137,13 @@ Costs are **estimates at public API list prices**. If you are on a
 subscription (Claude Pro/Max, ChatGPT Plus/Pro), read them as the API-equivalent
 value of your usage, not as your bill. Anthropic prices are built in (Claude 5
 family back to Claude 3.5 Haiku), including cache read/write rates, Haiku 5.5's
-long-prompt tier and fast mode. Built-in OpenAI and Gemini prices cover only
-well-established models; please verify them.
+long-prompt tier and fast mode. OpenAI prices are built in from OpenAI's table
+(GPT-6 and GPT-5.x families back to GPT-3.5 Turbo, plus o1/o3/o4-mini),
+including cached-input rates and, for models that list them, 30-minute and
+12-hour cache-write rates. Codex doesn't report which cache TTL was used, so
+cache writes are priced at the 30-minute rate. Models without a listed cached
+or write rate bill those tokens as ordinary input. Built-in Gemini prices cover
+only well-established models; please verify them.
 
 Models are matched by exact id after removing provider prefixes and date
 suffixes. A model without a known price is shown as `n/a` and its tokens are
@@ -147,7 +152,7 @@ name. Add prices in `config.yaml`:
 
 ```yaml
 pricing:
-  gpt-5.6-terra: {input: 1.25, output: 10, cache_read: 0.125}
+  my-local-model: {input: 1.25, output: 10, cache_read: 0.125}
 ```
 
 ## Budgets

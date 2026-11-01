@@ -28,7 +28,7 @@ agents:
 # 1.25x (5 minute write) and 2x (1 hour write) of the input price.
 # Models without a price show "n/a" instead of a guessed cost.
 pricing:
-  # gpt-5.6-terra: {input: 1.25, output: 10, cache_read: 0.125}
+  # my-local-model: {input: 1.25, output: 10, cache_read: 0.125}
 
 budgets:
   global:

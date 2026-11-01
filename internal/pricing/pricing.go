@@ -31,11 +31,32 @@ func std(in, out float64) Price {
 
 func withRead(p Price, read float64) Price { p.CacheRead = read; return p }
 
+// openai builds an OpenAI list price. A zero read price means the model has
+// no cached-input discount (cached tokens bill at the input price). Zero write
+// prices mean cache writes bill as ordinary input. Models with write tiers
+// list a 30 minute and a 12 hour rate; Codex does not report which TTL was
+// used and records writes in the default slot, so the 30 minute rate goes in
+// CacheWrite5m and the 12 hour rate in CacheWrite1h.
+func openai(in, out, read, write30m, write12h float64) Price {
+	p := Price{Input: in, Output: out, CacheRead: in, CacheWrite5m: in, CacheWrite1h: in}
+	if read > 0 {
+		p.CacheRead = read
+	}
+	if write30m > 0 {
+		p.CacheWrite5m = write30m
+	}
+	if write12h > 0 {
+		p.CacheWrite1h = write12h
+	}
+	return p
+}
+
 // defaults are list prices. Anthropic prices were taken from the Claude API
-// reference (cached 2026-10-06). OpenAI and Google entries cover only models
-// whose published prices are well established; anything else is unpriced
-// until the user adds it to config.yaml. Prices are never guessed from a
-// similar-looking model name.
+// reference (cached 2026-10-06); OpenAI prices from OpenAI's pricing table
+// (provided 2026-11-01). Google entries cover only models whose published
+// prices are well established. Anything else is unpriced until the user adds
+// it to config.yaml. Prices are never guessed from a similar-looking model
+// name, and context windows are only set where known.
 var defaults = map[string]Price{
 	// Anthropic
 	"claude-fable-5-1":  withRead(ctx(std(10, 50), 1_000_000), 0.25),
@@ -59,15 +80,45 @@ var defaults = map[string]Price{
 	"claude-haiku-4-5":  ctx(std(1, 5), 200_000),
 	"claude-3-5-haiku":  ctx(std(0.8, 4), 200_000),
 
-	// OpenAI (cached input is billed at 10% for the GPT-5 family)
-	"gpt-5":       ctx(std(1.25, 10), 400_000),
-	"gpt-5-mini":  ctx(std(0.25, 2), 400_000),
-	"gpt-5-nano":  ctx(std(0.05, 0.40), 400_000),
-	"gpt-5-codex": ctx(std(1.25, 10), 400_000),
-	"gpt-4.1":     withRead(ctx(std(2, 8), 1_000_000), 0.5),
-	"gpt-4o":      withRead(ctx(std(2.5, 10), 128_000), 1.25),
-	"o3":          withRead(ctx(std(2, 8), 200_000), 0.5),
-	"o4-mini":     withRead(ctx(std(1.1, 4.4), 200_000), 0.275),
+	// OpenAI: input, output, cached input, 30m write, 12h write (0 = not listed)
+	"gpt-6-astra":            openai(10, 50, 1, 12.5, 25),
+	"gpt-6.1-sol":            openai(2, 10, 0.10, 2.5, 5),
+	"gpt-6.1-terra":          openai(1, 5, 0.05, 1.25, 2.5),
+	"gpt-6-luna":             openai(0.10, 0.50, 0.01, 0.125, 0.25),
+	"gpt-6-sol":              openai(2, 10, 0.20, 2.5, 5),
+	"gpt-5.6-sol":            openai(4, 20, 0.40, 5, 10),
+	"gpt-5.6-terra":          openai(2, 12, 0.20, 2.5, 5),
+	"gpt-5.6-luna":           openai(0.20, 1.20, 0.02, 0.25, 0.50),
+	"gpt-5.5":                openai(5, 30, 0.50, 0, 0),
+	"gpt-5.5-pro":            openai(30, 180, 0, 0, 0),
+	"gpt-5.4":                openai(2.5, 15, 0.25, 0, 0),
+	"gpt-5.4-pro":            openai(30, 180, 0, 0, 0),
+	"gpt-5.4-mini":           openai(0.75, 4.5, 0.075, 0, 0),
+	"gpt-5.4-nano":           openai(0.20, 1.25, 0.02, 0, 0),
+	"gpt-5.2":                openai(1.75, 14, 0.175, 0, 0),
+	"gpt-5.2-pro":            openai(21, 168, 0, 0, 0),
+	"gpt-5.1":                openai(1.25, 10, 0.125, 0, 0),
+	"gpt-5":                  ctx(openai(1.25, 10, 0.125, 0, 0), 400_000),
+	"gpt-5-mini":             ctx(openai(0.25, 2, 0.025, 0, 0), 400_000),
+	"gpt-5-nano":             ctx(openai(0.05, 0.40, 0.005, 0, 0), 400_000),
+	"gpt-5-pro":              openai(15, 120, 0, 0, 0),
+	"gpt-5-codex":            ctx(std(1.25, 10), 400_000),
+	"gpt-4.1":                ctx(openai(2, 8, 0.50, 0, 0), 1_000_000),
+	"gpt-4.1-mini":           openai(0.40, 1.60, 0.10, 0, 0),
+	"gpt-4.1-nano":           openai(0.10, 0.40, 0.025, 0, 0),
+	"gpt-4o":                 ctx(openai(2.5, 10, 1.25, 0, 0), 128_000),
+	"gpt-4o-mini":            openai(0.15, 0.60, 0.075, 0, 0),
+	"gpt-4o-2024-05-13":      openai(5, 15, 0, 0, 0),
+	"gpt-4-turbo-2024-04-09": openai(10, 30, 0, 0, 0),
+	"gpt-4-0613":             openai(30, 60, 0, 0, 0),
+	"gpt-3.5-turbo":          openai(0.50, 1.50, 0, 0, 0),
+	"gpt-3.5-turbo-0125":     openai(0.50, 1.50, 0, 0, 0),
+	"o4-mini":                ctx(openai(1.1, 4.4, 0.275, 0, 0), 200_000),
+	"o3":                     ctx(openai(2, 8, 0.50, 0, 0), 200_000),
+	"o3-mini":                openai(1.1, 4.4, 0.55, 0, 0),
+	"o3-pro":                 openai(20, 80, 0, 0, 0),
+	"o1":                     openai(15, 60, 7.5, 0, 0),
+	"o1-pro":                 openai(150, 600, 0, 0, 0),
 
 	// Google (prices for prompts up to 200k tokens)
 	"gemini-2.5-pro":   long(withRead(ctx(std(1.25, 10), 1_000_000), 0.31), 200_000, 2.5, 15),

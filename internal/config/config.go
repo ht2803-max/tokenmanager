@@ -202,7 +202,7 @@ const header = `# TokenManager configuration
 # Docs: run "tokenmanager config --help". All money values use the "currency" field.
 # pricing: USD per million tokens, e.g.
 #   pricing:
-#     gpt-5.6-terra: {input: 1.25, output: 10}
+#     my-local-model: {input: 1.25, output: 10}
 # budgets.per_agent / per_project / per_model take daily/weekly/monthly limits.
 # Budgets are monitoring only; they never enforce provider-side limits.
 `
