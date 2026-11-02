@@ -45,7 +45,24 @@ type Dashboard struct {
 	Sessions []Session           `json:"sessions"`
 	Budgets  []BudgetStatus      `json:"budgets"`
 	Limits   []LimitPlan         `json:"limits"`
+	Tools    []Tool              `json:"tools"`
 	Findings []optimizer.Finding `json:"findings"`
+}
+
+// Tool is one analytics.ToolStat over the optimizer window (last 30 days).
+// Only names and counts are exported; calls are actual, the rest estimated.
+type Tool struct {
+	Key           string  `json:"key"`
+	MCPServer     string  `json:"mcp_server,omitempty"`
+	Calls         int64   `json:"calls"`
+	Sessions      int     `json:"sessions"`
+	AvgResult     int64   `json:"avg_result_tokens"`
+	P95Result     int64   `json:"p95_result_tokens"`
+	FirstTokens   int64   `json:"first_time_input_tokens"`
+	CarriedTokens int64   `json:"carried_tokens"`
+	OutputTokens  int64   `json:"output_tokens"`
+	Share         float64 `json:"share"`
+	Cost          float64 `json:"estimated_cost"`
 }
 
 // Meta describes the export and the calendar boundaries the page filters on.
@@ -246,7 +263,7 @@ func Build(e *analytics.Engine, opt Options) (*Dashboard, error) {
 		return nil, err
 	}
 	b := &builder{hide: e.Cfg.Privacy.HideProjectPaths, idx: map[string]map[string]int{}}
-	d := &Dashboard{Facts: []Fact{}, Hourly: []Fact{}, Sessions: []Session{}, Budgets: []BudgetStatus{}, Limits: []LimitPlan{}, Findings: []optimizer.Finding{}}
+	d := &Dashboard{Facts: []Fact{}, Hourly: []Fact{}, Sessions: []Session{}, Budgets: []BudgetStatus{}, Limits: []LimitPlan{}, Tools: []Tool{}, Findings: []optimizer.Finding{}}
 
 	// Facts: fold records into (bucket, agent, project, model) aggregates
 	// using the engine's own Add so costs come from the pricing table.
@@ -342,6 +359,20 @@ func Build(e *analytics.Engine, opt Options) (*Dashboard, error) {
 			lp.ReportedAt = r.Snapshot.Observed.UnixMilli()
 		}
 		d.Limits = append(d.Limits, lp)
+	}
+
+	win := analytics.Period{From: now.Add(-optimizer.Window), To: now.Add(time.Minute)}
+	wrecs, err := e.Records(win, opt.Filter)
+	if err != nil {
+		return nil, err
+	}
+	trep, err := e.Tools(win, opt.Filter, wrecs)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range trep.Group(analytics.ByTool) {
+		d.Tools = append(d.Tools, Tool{t.Key, t.Server, t.Calls, t.Sessions(), t.AvgResult, t.P95Result,
+			t.FirstTokens, t.CarriedTokens, t.OutputTokens, math.Round(t.Share*1e4) / 1e4, money(t.Cost)})
 	}
 
 	fs, err := optimizer.Analyze(e, opt.Filter)

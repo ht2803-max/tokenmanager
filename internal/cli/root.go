@@ -78,8 +78,17 @@ func setup(cmd *cobra.Command) (*env, error) {
 		for _, err := range res.Errors {
 			fmt.Fprintln(os.Stderr, sWarn.Render("warning: ")+err.Error())
 		}
+		backfillNote(res)
 	}
 	return e, nil
+}
+
+// backfillNote reports a one-time re-read after an upgrade, so a slow first
+// run is explained.
+func backfillNote(res collector.Result) {
+	if res.Reparsed > 0 {
+		fmt.Fprintln(os.Stderr, sDim.Render(fmt.Sprintf("Backfilled tool-call data from %d existing session files (one time).", res.Reparsed)))
+	}
 }
 
 func logger() *slog.Logger {
@@ -139,7 +148,7 @@ Run without arguments to open the interactive dashboard.`,
 		periodCmd("week", "Show this week's usage"),
 		periodCmd("month", "Show this month's spending and token consumption"),
 		agentsCmd(), sessionsCmd(), projectsCmd(), modelsCmd(), costsCmd(),
-		optimizeCmd(), budgetCmd(), limitsCmd(), watchCmd(), exportCmd(), daemonCmd(),
+		optimizeCmd(), toolsCmd(), budgetCmd(), limitsCmd(), watchCmd(), exportCmd(), daemonCmd(),
 		scanCmd(), configCmd(), webCmd(),
 	)
 	return root

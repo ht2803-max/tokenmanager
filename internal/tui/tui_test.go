@@ -51,6 +51,18 @@ func fixtureModel(t *testing.T) *Model {
 	if _, err := db.Insert(recs); err != nil {
 		t.Fatal(err)
 	}
+	// Tool calls (with long MCP names) so the Tools panel and session detail render rows.
+	var calls []model.ToolCall
+	toolNames := []string{"Read", "Bash", "Grep", "mcp__a-very-long-server-name__with_a_long_tool_name", "Edit"}
+	for i, r := range recs {
+		tool, srv := model.NormalizeTool(toolNames[i%len(toolNames)])
+		calls = append(calls, model.ToolCall{ID: fmt.Sprint("tu", i), RecordKey: r.Key, SessionID: r.SessionID, Timestamp: r.Timestamp,
+			Agent: r.Agent, Tool: tool, MCPServer: srv, InputBytes: int64(40 + i), ResultBytes: int64(4000 * (i%7 + 1)),
+			ResultTokens: int64(1000 * (i%7 + 1)), HasResult: true})
+	}
+	if err := db.UpsertTools(calls); err != nil {
+		t.Fatal(err)
+	}
 	// A current Codex snapshot so the Limits view renders reported windows.
 	err = db.SaveRateLimits(model.RateLimits{Provider: "openai", Agent: "codex", Plan: "plus", Observed: now,
 		Primary:   &model.RateLimitWindow{UsedPercent: 42, WindowMinutes: 300, ResetsAt: now.Add(2 * time.Hour)},

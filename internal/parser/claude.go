@@ -18,9 +18,10 @@ type claudeLine struct {
 	RequestID   string `json:"requestId"`
 	IsSidechain bool   `json:"isSidechain"`
 	Message     *struct {
-		ID    string `json:"id"`
-		Model string `json:"model"`
-		Usage *struct {
+		ID      string          `json:"id"`
+		Model   string          `json:"model"`
+		Content json.RawMessage `json:"content"`
+		Usage   *struct {
 			InputTokens              int64 `json:"input_tokens"`
 			OutputTokens             int64 `json:"output_tokens"`
 			CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
@@ -37,6 +38,26 @@ type claudeLine struct {
 	} `json:"message"`
 }
 
+// claudeBlock is the subset of a content block needed to size tool calls.
+// Inputs and results are decoded only to be measured and are then dropped.
+type claudeBlock struct {
+	Type      string          `json:"type"`
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Input     json.RawMessage `json:"input"`
+	ToolUseID string          `json:"tool_use_id"`
+	Content   json.RawMessage `json:"content"`
+}
+
+func claudeBlocks(raw json.RawMessage) []claudeBlock {
+	if len(raw) == 0 || raw[0] != '[' {
+		return nil // plain string content
+	}
+	var bs []claudeBlock
+	_ = json.Unmarshal(raw, &bs)
+	return bs
+}
+
 // ParseClaude reads a Claude Code session transcript (~/.claude/projects/**/*.jsonl).
 //
 // Claude Code writes one line per content block of an assistant message, and
@@ -45,7 +66,19 @@ type claudeLine struct {
 // Resumed sessions that copy earlier history produce the same keys and are
 // collapsed too.
 func ParseClaude(r io.Reader, path string, st State) ([]model.Record, int64, error) {
+	recs, _, n, err := ParseClaudeTools(r, path, st)
+	return recs, n, err
+}
+
+// ParseClaudeTools is ParseClaude plus tool calls. A tool_use block on an
+// assistant line becomes a call linked to that line's request key; a
+// tool_result block on a later user line becomes the result half of the same
+// row (linked by tool_use_id). Both are keyed by the tool_use id, so lines
+// repeated by resumed or forked sessions merge instead of double counting,
+// and a result read long after its call needs no parser state to find it.
+func ParseClaudeTools(r io.Reader, path string, st State) ([]model.Record, []model.ToolCall, int64, error) {
 	var out []model.Record
+	var tools []model.ToolCall
 	n, err := ReadLines(r, func(line []byte) {
 		var l claudeLine
 		if json.Unmarshal(line, &l) != nil {
@@ -53,6 +86,18 @@ func ParseClaude(r io.Reader, path string, st State) ([]model.Record, int64, err
 		}
 		if l.Cwd != "" {
 			st["cwd"] = l.Cwd
+		}
+		if l.Type == "user" && l.Message != nil {
+			ts, ok := ParseTime(l.Timestamp)
+			if !ok {
+				return
+			}
+			for _, b := range claudeBlocks(l.Message.Content) {
+				if b.Type == "tool_result" && b.ToolUseID != "" {
+					tools = append(tools, toolResult(b.ToolUseID, "claude-code", l.SessionID, ts, b.Content))
+				}
+			}
+			return
 		}
 		if l.Type != "assistant" || l.Message == nil || l.Message.Usage == nil {
 			return
@@ -98,8 +143,13 @@ func ParseClaude(r io.Reader, path string, st State) ([]model.Record, int64, err
 		}
 		rec.Key = "claude:" + id + ":" + l.RequestID
 		out = append(out, rec)
+		for _, b := range claudeBlocks(m.Content) {
+			if b.Type == "tool_use" && b.ID != "" {
+				tools = append(tools, toolCall(b.ID, b.Name, "claude-code", l.SessionID, rec.Key, ts, rawLen(b.Input)))
+			}
+		}
 	})
-	return out, n, err
+	return out, tools, n, err
 }
 
 func firstNonEmpty(s ...string) string {

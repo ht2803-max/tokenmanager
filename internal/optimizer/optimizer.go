@@ -83,6 +83,9 @@ func Analyze(e *analytics.Engine, f storage.Filter) ([]Finding, error) {
 	a := &analyzer{e: e, recs: recs, now: now}
 	days := now.Sub(recs[0].Timestamp).Hours() / 24
 	a.monthly = 30 / max(days, 1)
+	if a.tools, err = e.Tools(analytics.Period{From: now.Add(-Window), To: now.Add(time.Minute)}, f, recs); err != nil {
+		return nil, err
+	}
 
 	a.instructionFiles()
 	a.cacheEfficiency()
@@ -91,6 +94,11 @@ func Analyze(e *analytics.Engine, f storage.Filter) ([]Finding, error) {
 	a.outlierSessions()
 	a.longSessions()
 	a.projectConcentration()
+	a.largeToolResults()
+	a.rereadResults()
+	a.shellFloods()
+	a.mcpOverhead()
+	a.carriedContext()
 
 	sort.SliceStable(a.out, func(i, j int) bool {
 		if a.out[i].Severity != a.out[j].Severity {
@@ -109,6 +117,7 @@ type analyzer struct {
 	recs    []model.Record
 	now     time.Time
 	monthly float64 // multiplier from the observed window to 30 days
+	tools   analytics.ToolReport
 	out     []Finding
 }
 

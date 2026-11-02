@@ -52,7 +52,26 @@ CREATE TABLE IF NOT EXISTS kv (
 	k TEXT PRIMARY KEY,
 	v TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS tool_calls (
+	id            TEXT PRIMARY KEY,
+	record_key    TEXT NOT NULL,
+	session_id    TEXT NOT NULL,
+	ts            INTEGER NOT NULL,
+	agent         TEXT NOT NULL,
+	tool          TEXT NOT NULL,
+	mcp_server    TEXT NOT NULL,
+	input_bytes   INTEGER NOT NULL,
+	result_bytes  INTEGER NOT NULL,
+	result_tokens INTEGER NOT NULL,
+	has_result    INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS tool_calls_ts ON tool_calls(ts);
 `
+
+// SchemaVersion is stored in kv as "schema_version". Version 2 added
+// tool_calls; databases created earlier have no tool rows for files already
+// read past their offsets (the collector backfills them once).
+const SchemaVersion = 2
 
 // DB wraps the SQLite handle.
 type DB struct{ db *sql.DB }
@@ -71,7 +90,14 @@ func Open(path string) (*DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate %s: %w", path, err)
 	}
-	return &DB{db: db}, nil
+	d := &DB{db: db}
+	if d.Get("schema_version") != fmt.Sprint(SchemaVersion) {
+		if err := d.Set("schema_version", fmt.Sprint(SchemaVersion)); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	return d, nil
 }
 
 // Close closes the database.
@@ -106,6 +132,93 @@ func (d *DB) Insert(recs []model.Record) ([]model.Record, error) {
 		}
 	}
 	return added, tx.Commit()
+}
+
+// UpsertTools merges partial tool rows by call id. A call, its result and a
+// late link to its request may arrive in different reads or files (resumed
+// sessions copy history), so every column keeps the first non-empty value
+// and sizes keep the maximum: re-reading anything is idempotent.
+func (d *DB) UpsertTools(calls []model.ToolCall) error {
+	if len(calls) == 0 {
+		return nil
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`INSERT INTO tool_calls VALUES (?,?,?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(id) DO UPDATE SET
+			record_key    = CASE WHEN record_key = '' THEN excluded.record_key ELSE record_key END,
+			session_id    = CASE WHEN session_id = '' THEN excluded.session_id ELSE session_id END,
+			ts            = CASE WHEN excluded.ts <> 0 AND (ts = 0 OR (tool = '' AND excluded.tool <> '')) THEN excluded.ts ELSE ts END,
+			agent         = CASE WHEN agent = '' THEN excluded.agent ELSE agent END,
+			mcp_server    = CASE WHEN tool = '' THEN excluded.mcp_server ELSE mcp_server END,
+			tool          = CASE WHEN tool = '' THEN excluded.tool ELSE tool END,
+			input_bytes   = MAX(input_bytes, excluded.input_bytes),
+			result_bytes  = MAX(result_bytes, excluded.result_bytes),
+			result_tokens = MAX(result_tokens, excluded.result_tokens),
+			has_result    = MAX(has_result, excluded.has_result)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, c := range calls {
+		var ts int64
+		if !c.Timestamp.IsZero() {
+			ts = c.Timestamp.UnixMilli()
+		}
+		if _, err := stmt.Exec(c.ID, c.RecordKey, c.SessionID, ts, c.Agent, c.Tool, c.MCPServer,
+			c.InputBytes, c.ResultBytes, c.ResultTokens, c.HasResult); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// QueryTools returns tool calls in the filter's time range. Agent filters
+// apply to the call; project and model filters to the request that emitted
+// it, so calls whose request is unknown are dropped when those are set.
+func (d *DB) QueryTools(f Filter) ([]model.ToolCall, error) {
+	where := []string{"t.tool <> ''"}
+	var args []any
+	if !f.From.IsZero() {
+		where, args = append(where, "t.ts >= ?"), append(args, f.From.UnixMilli())
+	}
+	if !f.To.IsZero() {
+		where, args = append(where, "t.ts < ?"), append(args, f.To.UnixMilli())
+	}
+	if f.Agent != "" {
+		where, args = append(where, "t.agent = ?"), append(args, f.Agent)
+	}
+	if f.Project != "" {
+		where, args = append(where, "r.project LIKE ?"), append(args, "%"+f.Project+"%")
+	}
+	if f.Model != "" {
+		where, args = append(where, "r.model LIKE ?"), append(args, "%"+f.Model+"%")
+	}
+	if f.Session != "" {
+		where, args = append(where, "t.session_id = ?"), append(args, f.Session)
+	}
+	q := `SELECT t.id,t.record_key,t.session_id,t.ts,t.agent,t.tool,t.mcp_server,t.input_bytes,t.result_bytes,t.result_tokens,t.has_result
+		FROM tool_calls t LEFT JOIN records r ON r.key = t.record_key WHERE ` + strings.Join(where, " AND ") + ` ORDER BY t.ts`
+	rows, err := d.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.ToolCall
+	for rows.Next() {
+		var c model.ToolCall
+		var ts int64
+		if err := rows.Scan(&c.ID, &c.RecordKey, &c.SessionID, &ts, &c.Agent, &c.Tool, &c.MCPServer,
+			&c.InputBytes, &c.ResultBytes, &c.ResultTokens, &c.HasResult); err != nil {
+			return nil, err
+		}
+		c.Timestamp = time.UnixMilli(ts)
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // Filter narrows record queries. Zero values match everything.
@@ -237,6 +350,9 @@ func (d *DB) Prune(before time.Time) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	if _, err := d.db.Exec(`DELETE FROM tool_calls WHERE ts < ?`, before.UnixMilli()); err != nil {
+		return 0, err
+	}
 	return res.RowsAffected()
 }
 
@@ -265,6 +381,6 @@ func (d *DB) Stats() (Stats, error) {
 
 // Reset deletes all records and file offsets (used by "scan --rebuild").
 func (d *DB) Reset() error {
-	_, err := d.db.Exec(`DELETE FROM records; DELETE FROM files;`)
+	_, err := d.db.Exec(`DELETE FROM records; DELETE FROM files; DELETE FROM tool_calls;`)
 	return err
 }
