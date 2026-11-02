@@ -25,7 +25,8 @@
     sort: {
       sessions: { key: 'end', dir: -1 },
       projects: { key: 'cost', dir: -1 },
-      models: { key: 'cost', dir: -1 }
+      models: { key: 'cost', dir: -1 },
+      tools: { key: 'cost', dir: -1 }
     }
   };
 
@@ -384,7 +385,10 @@
     clear(container).appendChild(el('div', { class: 'mix' }, el('div', { class: 'chart' }, s), rows));
   }
 
-  function hbars(container, items) {
+  // hbars draws horizontal bars scaled to the largest item. The small figure
+  // is each item's share of the items shown unless absolute is set (the
+  // item's text already carries the figure that matters).
+  function hbars(container, items, absolute) {
     var max = 0, tot = 0;
     items.forEach(function (it) { max = Math.max(max, it.value); tot += it.value; });
     if (!items.length || max === 0) return emptyChart(container, 'No priced usage in this range.');
@@ -394,7 +398,7 @@
       var row = el('div', { class: 'hbar' },
         el('div', { class: 'hbar-top' },
           el('span', { class: 'name' }, el('i', { class: 'dot', style: { background: it.color } }), it.label),
-          el('span', { class: 'v' }, it.text, el('small', null, pct(it.value / tot, 0)))),
+          el('span', { class: 'v' }, it.text, absolute ? null : el('small', null, pct(it.value / tot, 0)))),
         el('div', { class: 'bar' }, fill));
       row.addEventListener('mouseenter', function (e) { showTip(e, it.label, it.tip); });
       row.addEventListener('mousemove', moveTip);
@@ -811,6 +815,39 @@
     if (g.rows.some(function (r) { return r.unpriced > 0; })) root.appendChild(unpricedNote(g.sel));
   }
 
+  // Tools are attributed in Go over the last 30 days (like Optimization), so
+  // the range and dimension filters do not apply. Only call counts are
+  // actual; tokens and costs are estimates.
+  function renderTools(root) {
+    var ts = D.tools || [];
+    root.appendChild(sectionHead('Tools', 'Last 30 days · not affected by the filters above · calls actual, tokens and cost estimated' + (M.filter ? ' (export filtered: ' + M.filter + ')' : '')));
+    if (!ts.length) {
+      root.appendChild(el('div', { class: 'card' }, el('div', { class: 'empty' }, 'No tool calls recorded in the last 30 days.')));
+      return;
+    }
+    var c = chartCard('span-12', 'Share of input by tool', 'Estimated first-time + carried result tokens over all prompt tokens · top 10');
+    root.appendChild(el('div', { class: 'grid' }, c.card));
+    hbars(c.body, ts.slice().sort(function (a, b) { return b.share - a.share; }).slice(0, 10).filter(function (t) { return t.share > 0; }).map(function (t) {
+      return {
+        label: t.key, value: t.share, color: 'var(--s1)', text: pct(t.share),
+        tip: [{ label: 'Calls', value: thousands(t.calls) }, { label: 'First-time (est.)', value: tokens(t.first_time_input_tokens) },
+          { label: 'Carried (est.)', value: tokens(t.carried_tokens) }, { label: 'Cost (est.)', value: money(t.estimated_cost) }]
+      };
+    }), true);
+    var tbl = table('tools', [
+      { key: 'key', label: 'Tool', sort: function (t) { return t.key; }, cell: function (t) { return t.key; } },
+      numCol('calls', 'Calls', thousands),
+      numCol('avg', 'Avg result', tokens, 'avg_result_tokens'),
+      numCol('p95', 'P95 result', tokens, 'p95_result_tokens'),
+      numCol('first', 'Est. result tok', tokens, 'first_time_input_tokens'),
+      numCol('carried', 'Est. carried tok', tokens, 'carried_tokens'),
+      { key: 'share', label: 'Share of input', num: true, sort: function (t) { return t.share; }, cell: function (t) { return shareCell(t.share); } },
+      { key: 'cost', label: 'Est. cost', num: true, sort: function (t) { return t.estimated_cost; }, cell: function (t) { return money(t.estimated_cost); } }
+    ], ts);
+    root.appendChild(el('div', { class: 'card table-card', style: { 'margin-top': '14px' } }, tbl.node));
+    root.appendChild(el('p', { class: 'footnote' }, 'Result tokens are result bytes ÷ 4 charged to the next request in the session; carried tokens are the same result re-read from cache by later requests until the session ends or is compacted; each request’s output is split across its tool calls by input size. Only tool names and byte counts are stored. MCP tools are shown as server/tool.'));
+  }
+
   var SEV = { high: ['bad', 'High'], medium: ['warn', 'Medium'], low: ['accent', 'Low'], info: ['', 'Info'] };
   function renderOptimization(root) {
     var fs = D.findings, totalSave = 0, counts = {};
@@ -890,7 +927,7 @@
 
   // ------------------------------------------------------------ shell
 
-  var RENDER = { overview: renderOverview, agents: renderAgents, sessions: renderSessions, projects: renderProjects, models: renderModels, optimization: renderOptimization, budgets: renderBudgets };
+  var RENDER = { overview: renderOverview, agents: renderAgents, sessions: renderSessions, projects: renderProjects, models: renderModels, tools: renderTools, optimization: renderOptimization, budgets: renderBudgets };
 
   function render() {
     hideTip();

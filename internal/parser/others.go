@@ -32,6 +32,12 @@ type geminiSession struct {
 		Type      string        `json:"type"`
 		Model     string        `json:"model"`
 		Tokens    *geminiTokens `json:"tokens"`
+		ToolCalls []struct {
+			ID     string          `json:"id"`
+			Name   string          `json:"name"`
+			Args   json.RawMessage `json:"args"`
+			Result json.RawMessage `json:"result"`
+		} `json:"toolCalls"`
 	} `json:"messages"`
 }
 
@@ -40,14 +46,23 @@ type geminiSession struct {
 // ids keep the records stable across re-reads. Gemini reports cached tokens
 // inside the prompt count, and thoughts separately from candidates.
 func ParseGemini(r io.Reader, path string, st State) ([]model.Record, int64, error) {
+	recs, _, n, err := ParseGeminiTools(r, path, st)
+	return recs, n, err
+}
+
+// ParseGeminiTools is ParseGemini plus tool calls. Gemini CLI records each
+// call (id, name, args, result) on the gemini message that requested it, so
+// call and result arrive together and link to that message's record.
+func ParseGeminiTools(r io.Reader, path string, st State) ([]model.Record, []model.ToolCall, int64, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
 	var s geminiSession
 	if err := json.Unmarshal(data, &s); err != nil {
-		return nil, 0, fmt.Errorf("gemini session %s: %w", filepath.Base(path), err)
+		return nil, nil, 0, fmt.Errorf("gemini session %s: %w", filepath.Base(path), err)
 	}
+	var tools []model.ToolCall
 	project := st["project"]
 	if project == "" && s.ProjectHash != "" {
 		project = "gemini:" + s.ProjectHash[:min(8, len(s.ProjectHash))]
@@ -82,8 +97,17 @@ func ParseGemini(r io.Reader, path string, st State) ([]model.Record, int64, err
 		id := firstNonEmpty(m.ID, strconv.Itoa(i))
 		rec.Key = "gemini:" + s.SessionID + ":" + id
 		out = append(out, rec)
+		for j, c := range m.ToolCalls {
+			cid := "gemini:" + s.SessionID + ":" + firstNonEmpty(c.ID, id+"#"+strconv.Itoa(j))
+			tc := toolCall(cid, c.Name, "gemini-cli", s.SessionID, rec.Key, ts, rawLen(c.Args))
+			if len(c.Result) > 0 && string(c.Result) != "null" {
+				res := toolResult(cid, "gemini-cli", s.SessionID, ts, c.Result)
+				tc.ResultBytes, tc.ResultTokens, tc.HasResult = res.ResultBytes, res.ResultTokens, true
+			}
+			tools = append(tools, tc)
+		}
 	}
-	return out, int64(len(data)), nil
+	return out, tools, int64(len(data)), nil
 }
 
 // ---------------------------------------------------------------- Aider

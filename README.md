@@ -74,7 +74,7 @@ takes a few milliseconds.
 | `1`–`9`, `←/→` | Overview, Usage, Agents, Sessions, Projects, Models, Optimize, Budgets, Settings |
 | `0` | Limits: current 5h block, weekly window, recent blocks ([Subscription plans](#subscription-plans)) |
 | `j/k`, `↑/↓`, `pgup/pgdn`, `g/G` | move in lists |
-| `tab` | switch panel (Overview), toggle the detail pane elsewhere |
+| `tab` | switch panel (Overview), Tools panel (Usage), toggle the detail pane elsewhere |
 | `enter` / `esc` | open / close details |
 | `f` / `F` | date filter: today → week → month → 30 days → all |
 | `/` | search the current list |
@@ -95,6 +95,7 @@ updates live while you work. It also rescans slowly as a safety net.
 | `projects`, `models` | per-project and per-model comparison |
 | `costs` | cost split by input / output / cache read / cache write; month projection |
 | `optimize` | 30-day analysis with estimated savings |
+| `tools [--by server]` | tool calls, result sizes, estimated result/carried tokens, share of input and cost per tool or MCP server ([Tools](#tools)) |
 | `budget`, `budget set monthly 100 [--for agent:claude-code]`, `budget rm …` | budgets |
 | `limits [-n 10]` (alias `blocks`) | subscription windows: current 5h block, burn rate, projection, weekly window, recent blocks |
 | `watch` | live stream of new requests with running cost |
@@ -224,7 +225,8 @@ tokenmanager web --no-scan                # use the database as is, skip ingesti
 - **What's inside.** Overview cards (today, week, month, projected month,
   monthly budget), daily token and spend charts, the input/output/cache mix,
   spend by agent, plus agents, sessions, projects, models, optimization
-  findings and budgets. You can filter by date range (today, 7 days, 30 days,
+  findings, a Tools tab (per-tool table and a "share of input by tool" chart,
+  last 30 days) and budgets. You can filter by date range (today, 7 days, 30 days,
   all time), agent, project and model, sort tables, expand sessions, hover
   over charts, and switch between dark and light themes.
 - **Works offline.** The page is a single file with its CSS, JavaScript and
@@ -241,8 +243,8 @@ tokenmanager web --no-scan                # use the database as is, skip ingesti
   collected. Run `tokenmanager web` again to regenerate it, then reload the
   page in your browser.
 - **Treat it as private.** The file holds aggregated usage only: token counts,
-  costs, model names, session IDs and project names. It never contains
-  prompts, responses or code. Anyone who has the file can still read that
+  costs, model names, session IDs, project names and tool names with sizes. It
+  never contains prompts, responses, code or tool inputs and outputs. Anyone who has the file can still read that
   data, so it's written with user-only permissions. Project paths are shown
   relative to `~`; set `privacy.hide_project_paths: true` to export only the
   last path element. The page lists at most the 1,000 most recent sessions;
@@ -255,6 +257,58 @@ tokenmanager web --no-scan                # use the database as is, skip ingesti
 while the TUI is closed. To start it at login, see `packaging/launchd` (macOS)
 or `packaging/systemd` (Linux).
 
+## Tools
+
+`tokenmanager tools` breaks usage down by tool name (`Read`, `Bash`, `Grep`,
+`Edit`, `WebFetch`, Codex `exec`, Gemini `read_file`, …). MCP tools
+(`mcp__<server>__<tool>`) are shown as `server/tool`, and `--by server` groups
+them by MCP server. Unknown or empty names are counted as `other`. The
+period, `--agent`, `--project`, `--model`, `--json` and `--csv` flags work as
+they do elsewhere. In the TUI, press `tab` in Usage (view 2) to show the Tools
+panel. Session details also list the top tools when the terminal is tall
+enough. The browser dashboard has a Tools tab covering the last 30 days.
+
+```
+  Tool        Calls  Avg result  P95 result  Est. result tok  Est. carried tok  Share of input  Est. cost
+  Bash          202         798        3.3k             161k             6.03M           13.5%      $5.11
+```
+
+**How tokens are attributed, and how accurate it is.** Providers report usage
+per request, not per content block. Only the **call counts are actual**. The
+rest is **estimated**:
+
+| Figure | How it's estimated |
+|---|---|
+| Output tokens | A request that makes tool calls has its output tokens split across those calls, weighted by the byte length of each call's input, or evenly if lengths are unknown. Text and thinking in the same response count toward the calls too. |
+| Result tokens (first-time input) | Byte length of the result text ÷ 4, the same heuristic used for instruction files. Images count as a flat 1,600 tokens each, because their base64 size says nothing about their token count. The result is charged to the **next request** in the same session file, since that's where it enters the prompt. It's priced at that request's cache-write rate if it wrote to the cache, otherwise at its input rate. A result after the session's last request is never charged. |
+| Carried tokens | The same result tokens multiplied by the number of later requests that re-send them, priced at each request's cache-read rate (or its input rate if it had no cache hits). Counting stops when the session file ends, or when the prompt shrinks to less than half of the previous request's size (a compaction or summary). |
+| Share of input | (first-time + carried) ÷ all prompt tokens in the period. |
+
+Expect these numbers to be directionally right rather than exact. Tokenizers
+average more or less than 4 bytes per token. Agents may truncate or reformat
+results before sending them. A compaction that shrinks the prompt by less than
+half isn't detected. In older Claude Code transcripts that log subagent
+(sidechain) requests inside the parent file, carried context can stop early,
+because the subagent's small prompts look like a compaction. Newer versions
+write subagents to their own files, which are counted separately.
+
+**What's stored.** One row per tool call, keyed by the provider's call id:
+the tool and MCP server name, the session id, a timestamp, the input and
+result byte counts and the estimated result tokens. Inputs, outputs, file
+paths, commands and URLs are measured while parsing and then discarded.
+Calls and results are merged by id, so a result read in a later scan,
+or a resumed session that copies earlier history, is never counted twice.
+
+**Upgrading.** Older databases have no tool rows, because their files had
+already been read past their saved offsets. The first scan after upgrading
+re-reads Claude Code, Codex and Gemini files once from the start, and prints
+"Backfilled tool-call data from N existing session files". This keeps every
+stored record. It deliberately doesn't run `scan --rebuild`, which would drop
+history whose transcripts the agent has since deleted (Claude Code removes old
+transcripts after 30 days by default). Tool data is only available for
+transcripts that still exist. You can still run `tokenmanager scan --rebuild`
+yourself to rebuild everything from what's on disk.
+
 ## Optimization engine
 
 `tokenmanager optimize` (and view 7) looks at the last 30 days and reports:
@@ -265,6 +319,15 @@ or `packaging/systemd` (Linux).
 - premium models used for light tasks, priced against a cheaper alternative
 - unusually expensive sessions, long sessions near the context limit
 - projects that dominate spend
+- tool usage ([Tools](#tools), all estimates):
+  - **large tool results**: a built-in tool whose results are ≥15% of input tokens with a p95 ≥4k tokens, e.g. "Read results are ~40% of your input tokens; p95 Read result is ~18k tokens". Suggests reading with offset/limit or using Grep first.
+  - **re-read results**: one tool returning 10 or more results over 2k tokens in a single session. This usually means content was read again instead of remembered. Only counts and sizes are known.
+  - **shell output floods**: 3 or more shell commands that returned more than 5k tokens. Suggests piping through `head`/`tail` or quieter flags.
+  - **MCP overhead**: an MCP server whose results are ≥10% of input tokens, plus servers called at most twice, which still add their tool definitions to every request (no savings estimate, because definition sizes aren't in local logs).
+  - **carried context**: tool results re-sent by later requests make up ≥25% of prompt tokens and stay in context for 20 or more requests on average. Suggests `/compact` or a fresh session.
+
+  Savings are priced with the actual model and cache rates of the requests
+  that carried the results.
 
 Every saving is labelled as an estimate. Instruction files are read only to
 measure them (about 4 bytes per token) and are **never modified**.
@@ -280,7 +343,12 @@ database is stored at `~/.local/share/tokenmanager/usage.db` (honors `XDG_DATA_H
 ## Privacy
 
 Only token counts, model ids, timestamps, session ids and project paths are
-stored. Prompts, responses and code are never stored. Set
+stored, plus, for each tool call, the tool and MCP server **name** and the
+**byte counts** of its input and result. Prompts, responses, code, tool inputs
+and outputs, file paths read by tools, commands and URLs are never stored. A
+test feeds transcripts with fake API keys, paths and commands through every
+parser and checks that none of them appear in the database, the JSON/CSV
+exports or the HTML dashboard. Set
 `privacy.hide_project_paths: true` to keep only the last path element. The tool
 makes no network requests.
 
@@ -293,9 +361,9 @@ internal/tui          Bubble Tea dashboard (Lip Gloss, Bubbles)
 internal/agents       adapter registry and discovery
 internal/parser       per-agent log parsers → model.Record
 internal/collector    incremental ingestion, fsnotify watcher
-internal/storage      SQLite (records, file offsets, alert state)
+internal/storage      SQLite (records, tool calls, file offsets, alert state)
 internal/pricing      price table and cost calculation
-internal/analytics    aggregation, periods, series, projections, subscription blocks
+internal/analytics    aggregation, periods, series, projections, subscription blocks, tool attribution
 internal/optimizer    findings and savings estimates
 internal/budget       budget evaluation
 internal/daemon       background collector, notifications

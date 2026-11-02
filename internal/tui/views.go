@@ -128,7 +128,7 @@ func (m *Model) helpView(h int) string {
 		{"0", "Limits: subscription blocks (5h session, weekly window, recent blocks)"},
 		{"←/→  h/l", "previous / next view"},
 		{"j/k  ↑/↓", "move in lists · pgup/pgdn page · g/G top/bottom"},
-		{"tab", "switch panel (Overview) · toggle detail pane"},
+		{"tab", "switch panel (Overview) · Tools panel (Usage) · toggle detail pane"},
 		{"enter", "open details"},
 		{"esc", "close details / clear filter"},
 		{"f / F", "cycle date filter: today → week → month → 30 days → all"},
@@ -506,6 +506,9 @@ func (m *Model) usage(h int) string {
 		"Peak prompt " + stBold.Render(format.Tokens(sum.MaxPrompt)),
 	}
 	statLine := " " + strings.Join(stats, stDim.Render("  │  "))
+	if m.detail {
+		return lipgloss.JoinVertical(lipgloss.Left, fit(statLine, w), m.toolsPanel(w, h-1))
+	}
 	chartH := max(8, (h-1)/2)
 	hourly := d.period.Name == "today"
 	title := "Tokens per day · " + d.period.Label()
@@ -527,6 +530,61 @@ func (m *Model) usage(h int) string {
 	prov := panel("By provider", barList(d.byProvider, third-4, bh-3, func(g *analytics.Agg) string { return g.Key }, paletteStyle), third, bh, false)
 	mod := panel("By model", barList(d.byModel, w-2*third-4, bh-3, func(g *analytics.Agg) string { return g.Key }, paletteStyle), w-2*third, bh, false)
 	return lipgloss.JoinVertical(lipgloss.Left, fit(statLine, w), chart, lipgloss.JoinHorizontal(lipgloss.Top, dist, prov, mod))
+}
+
+// toolsPanel is the Usage view's Tools table (tab toggles it). Calls are
+// actual; tokens and cost are estimates, as the title says.
+func (m *Model) toolsPanel(w, h int) string {
+	ts := m.filteredTools()
+	title := fmt.Sprintf("Tools · %s · tokens and cost estimated · tab: back to charts", m.data.period.Label())
+	if len(ts) == 0 {
+		return panel(title, stDim.Render("No tool calls recorded for this period."), w, h, true)
+	}
+	cols := []col{{"Tool", 0, false}, {"Calls", 6, true}, {"Avg res", 7, true}, {"P95 res", 7, true}, {"Result", 7, true}, {"Carried", 8, true}, {"Share of input", 21, false}, {"Est. cost", 9, true}}
+	if w < 100 {
+		cols = append(cols[:4], cols[5], cols[7]) // Tool, Calls, Avg, P95, Carried, Cost
+	}
+	var top float64
+	for _, t := range ts {
+		top = max(top, t.Share)
+	}
+	var rows [][]string
+	for i, t := range ts {
+		f := 0.0
+		if top > 0 {
+			f = t.Share / top
+		}
+		row := []string{t.Key, format.Thousands(t.Calls), format.Tokens(t.AvgResult), format.Tokens(t.P95Result), format.Tokens(t.FirstTokens), format.Tokens(t.CarriedTokens),
+			paletteStyle(i, nil).Render(format.Bar(f, 13)) + " " + padLeft(format.Percent(t.Share), 7), format.Money(t.Cost)}
+		if w < 100 {
+			row = append(row[:4], row[5], row[7])
+		}
+		rows = append(rows, row)
+	}
+	return panel(title, table(cols, rows, m.cursor[vUsage], w-4, h-3), w, h, true)
+}
+
+// sessionTools summarizes a session's tools for its detail pane.
+func (m *Model) sessionTools(s *analytics.Session, w, rows int) string {
+	if rows < 2 {
+		return ""
+	}
+	var uses []analytics.ToolUse
+	for _, u := range m.data.tools.Uses {
+		if u.SessionID == s.ID && u.Agent == s.Agent {
+			uses = append(uses, u)
+		}
+	}
+	if len(uses) == 0 {
+		return ""
+	}
+	gs := analytics.GroupTools(uses, analytics.ByTool, s.Prompt())
+	lines := []string{stBold.Render("Tools") + stDim.Render(" (tokens estimated)")}
+	for _, g := range gs[:min(len(gs), rows-1)] {
+		val := fmt.Sprintf("%4d× ~%s", g.Calls, format.Tokens(g.InputTokens()))
+		lines = append(lines, fit(g.Key, w-lipgloss.Width(val))+stDim.Render(val))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ---------------------------------------------------------------- 3 agents
@@ -674,6 +732,9 @@ func (m *Model) sessionDetail(s *analytics.Session, w, h int) string {
 	}
 	half := w / 2
 	right := distribution(s.Agg, half-2) + "\n\n" + stBold.Render("Prompt size per request") + "\n" + stAccent.Render(fit(format.Sparkline(tail(prompts, half-2)), half-2))
+	if t := m.sessionTools(s, half-2, h-lipgloss.Height(right)-1); t != "" {
+		right += "\n\n" + t
+	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(half).Render(strings.Join(left, "\n")), right)
 }
 

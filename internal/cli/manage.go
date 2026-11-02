@@ -425,6 +425,9 @@ func scanCmd() *cobra.Command {
 			for _, err := range res.Errors {
 				fmt.Fprintln(os.Stderr, sWarn.Render("warning: ")+err.Error())
 			}
+			if !rebuild {
+				backfillNote(res)
+			}
 			st, _ := e.db.Stats()
 			fmt.Fprintf(e.out, "Scanned %d files (%d changed) in %s: %d new requests. Database holds %s requests in %s.\n",
 				res.Files, res.Changed, time.Since(start).Round(time.Millisecond), len(res.Added), format.Thousands(st.Records), e.cfg.DBPath())
