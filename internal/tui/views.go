@@ -332,7 +332,10 @@ func (m *Model) overview(h int) string {
 	o := d.ov
 	w := m.w
 	cards := 4
-	if w < 100 {
+	// Narrow windows stack the cards 2×2 (12 rows); when that would leave no
+	// room for the heatmap, keep them in one row with shorter subtitles.
+	compact := w < 100 && w >= 80 && h-12 < heatFit && h-6 >= heatFit
+	if w < 100 && !compact {
 		cards = 2
 	}
 	cw := w / cards
@@ -350,10 +353,16 @@ func (m *Model) overview(h int) string {
 		pf := o.ProjectedMonth / o.MonthBudget
 		projBar = levelStyle(pf).Render(format.BlockBar(pf, max(6, cw-14))) + " " + format.Percent(pf)
 	}
+	sub := func(full string, tokens int64) string {
+		if compact {
+			return format.Tokens(tokens) + " tokens"
+		}
+		return full
+	}
 	cs := []string{
-		statCard("Today", costStr(o.Today.Cost, o.Today.Unpriced), fmt.Sprintf("%s tokens · %d req", format.Tokens(o.Today.Tokens()), o.Today.Requests), sparkToday(d, cw-4), cw),
-		statCard("This week", costStr(o.Week.Cost, o.Week.Unpriced), fmt.Sprintf("%s tokens · %d sessions", format.Tokens(o.Week.Tokens()), o.Week.Sessions()), stDim.Render("in "+format.Tokens(o.Week.Input)+" · out "+format.Tokens(o.Week.Output)), cw),
-		statCard("This month", costStr(o.Month.Cost, o.Month.Unpriced), fmt.Sprintf("%s tokens · cache %s", format.Tokens(o.Month.Tokens()), format.Tokens(o.Month.CacheRead)), month, cw),
+		statCard("Today", costStr(o.Today.Cost, o.Today.Unpriced), sub(fmt.Sprintf("%s tokens · %d req", format.Tokens(o.Today.Tokens()), o.Today.Requests), o.Today.Tokens()), sparkToday(d, cw-4), cw),
+		statCard("This week", costStr(o.Week.Cost, o.Week.Unpriced), sub(fmt.Sprintf("%s tokens · %d sessions", format.Tokens(o.Week.Tokens()), o.Week.Sessions()), o.Week.Tokens()), stDim.Render("in "+format.Tokens(o.Week.Input)+" · out "+format.Tokens(o.Week.Output)), cw),
+		statCard("This month", costStr(o.Month.Cost, o.Month.Unpriced), sub(fmt.Sprintf("%s tokens · cache %s", format.Tokens(o.Month.Tokens()), format.Tokens(o.Month.CacheRead)), o.Month.Tokens()), month, cw),
 		statCard("Projected month", format.Money(o.ProjectedMonth), proj, projBar, w-cw*(cards-1)),
 	}
 	var top string
@@ -368,20 +377,34 @@ func (m *Model) overview(h int) string {
 	if rest < 8 {
 		return top
 	}
-	if n := len(d.limits); n > 0 && rest-(n+3) >= 12 {
+	// Don't let the block panel squeeze the heatmap out.
+	if n := len(d.limits); n > 0 && rest-(n+3) >= 12 && (rest-(n+3) >= heatFit || rest < heatFit) {
 		top = lipgloss.JoinVertical(lipgloss.Left, top, m.blockPanel(w))
 		rest -= n + 3
 	}
-	if rest-heatmapH >= 12 {
-		top = lipgloss.JoinVertical(lipgloss.Left, top, panel(heatmapTitle(d.activity), heatmap(d.activity, w-4), w, heatmapH, false))
+	inChart := false
+	switch {
+	case rest-heatmapH >= 12:
+		top = lipgloss.JoinVertical(lipgloss.Left, top, heatPanel(d.activity, w, heatmapH, false))
 		rest -= heatmapH
+	case rest >= heatFit:
+		inChart = true // the heatmap takes the 30-day chart's place
 	}
 	midH := rest / 2
+	if inChart {
+		midH = min(heatmapH, max(heatmapMinH, midH))
+	}
 	botH := rest - midH
+	chartPanel := func(cw int) string {
+		if inChart {
+			return heatPanel(d.activity, cw, midH, false)
+		}
+		return panel("Token consumption · last 30 days", columnChart(d.daily, cw-4, midH-3, false), cw, midH, false)
+	}
 	if w >= 100 {
 		lw := w * 3 / 5
 		rw := w - lw
-		chart := panel("Token consumption · last 30 days", columnChart(d.daily, lw-4, midH-3, false), lw, midH, false)
+		chart := chartPanel(lw)
 		agentsP := panel("Agents · "+d.period.Name, m.agentLines(rw-4, midH-3), rw, midH, m.focus == 1)
 		sess := panel("Recent sessions · "+d.period.Name, m.recentSessions(lw-4, botH-3), lw, botH, m.focus == 0)
 		br := panel("Breakdown · "+d.period.Name, m.breakdown(rw-4, botH-3), rw, botH, false)
@@ -389,7 +412,7 @@ func (m *Model) overview(h int) string {
 			lipgloss.JoinHorizontal(lipgloss.Top, chart, agentsP),
 			lipgloss.JoinHorizontal(lipgloss.Top, sess, br))
 	}
-	chart := panel("Token consumption · last 30 days", columnChart(d.daily, w-4, midH-3, false), w, midH, false)
+	chart := chartPanel(w)
 	sess := panel("Recent sessions", m.recentSessions(w-4, botH-3), w, botH, m.focus == 0)
 	return lipgloss.JoinVertical(lipgloss.Left, top, chart, sess)
 }
