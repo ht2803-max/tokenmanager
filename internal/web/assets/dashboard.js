@@ -494,6 +494,114 @@
     return D.budgets.filter(function (b) { return b.scope === 'global' && b.period === 'monthly'; })[0];
   }
 
+  // ------------------------------------------------------------ activity heatmap
+
+  // Daily tokens for whole weeks (Monday first) ending this week, following
+  // the agent/project/model filters but not the date range.
+  var HEAT_WEEKS = 53;
+  function activityData() {
+    var start = addDays(M.week_start, -7 * (HEAT_WEEKS - 1));
+    var days = [], idx = {};
+    for (var day = start; day <= M.today; day = addDays(day, 1)) {
+      idx[day] = days.length;
+      days.push({ day: day, t: zero() });
+    }
+    facts(start).forEach(function (f) {
+      var i = idx[D.dims.days[f[F.bucket]]];
+      if (i !== undefined) addFact(days[i].t, f);
+    });
+    var active = [], run = 0, a = { days: days, total: 0, activeDays: 0, streak: 0, longest: 0, peak: null, cuts: [] };
+    days.forEach(function (d) {
+      d.tok = tokTotal(d.t);
+      a.total += d.tok;
+      if (d.tok > 0) {
+        active.push(d.tok);
+        run++;
+        a.longest = Math.max(a.longest, run);
+        if (!a.peak || d.tok > a.peak.tok) a.peak = d;
+      } else run = 0;
+    });
+    a.activeDays = active.length;
+    // Current streak: today counts if active; otherwise it may end yesterday.
+    var i = days.length - 1;
+    if (i >= 0 && days[i].tok === 0) i--;
+    for (; i >= 0 && days[i].tok > 0; i--) a.streak++;
+    // Quartiles of active days, so one huge day doesn't wash out the rest.
+    active.sort(function (x, y) { return x - y; });
+    if (active.length) for (var q = 1; q <= 3; q++) a.cuts.push(active[Math.floor(q * active.length / 4)]);
+    return a;
+  }
+  function heatLevel(a, v) {
+    if (v <= 0) return 0;
+    var l = 1;
+    a.cuts.forEach(function (c) { if (v >= c) l++; });
+    return Math.min(l, 4);
+  }
+  function heatLegend() {
+    var cells = [0, 1, 2, 3, 4].map(function (l) { return el('i', { class: 'heat-swatch heat-' + l }); });
+    return el('div', { class: 'legend heat-legend', 'aria-hidden': 'true' }, el('span', null, 'Less'), el('span', { class: 'heat-swatches' }, cells), el('span', null, 'More'));
+  }
+  function heatmap(container, a) {
+    var weeks = Math.ceil(a.days.length / 7);
+    var labelW = 30, top = 18, gap = 3;
+    var avail = Math.max(container.clientWidth, 280) - labelW;
+    var cell = Math.max(8, Math.min(16, Math.floor(avail / weeks) - gap));
+    var step = cell + gap, w = labelW + weeks * step + 24, h = top + 7 * step; // room for the last month label
+    var root = svg('svg', { viewBox: '0 0 ' + w + ' ' + h, width: w, height: h, role: 'img',
+      'aria-label': 'Daily token activity for the last 12 months: ' + a.activeDays + ' active days, ' + tokens(a.total) + ' tokens' });
+    var lastEnd = -Infinity;
+    for (var c = 0; c < weeks; c++) {
+      var first = a.days[c * 7].day;
+      if (c === 0 || first.slice(5, 7) !== a.days[c * 7 - 7].day.slice(5, 7)) {
+        var x = labelW + c * step;
+        // Skip a label that would collide with the previous one (or a partial first month).
+        if (x >= lastEnd && !(c === 0 && weeks > 2 && a.days[14].day.slice(5, 7) !== first.slice(5, 7))) {
+          root.appendChild(svg('text', { class: 'tick', x: x, y: 11 }, MONTHS[+first.slice(5, 7) - 1]));
+          lastEnd = x + 30;
+        }
+      }
+    }
+    ['Mon', '', 'Wed', '', 'Fri', '', ''].forEach(function (lab, r) {
+      if (lab) root.appendChild(svg('text', { class: 'tick', x: 0, y: top + r * step + cell - 1 }, lab));
+    });
+    a.days.forEach(function (d, i) {
+      var c = Math.floor(i / 7), r = i % 7;
+      var rect = svg('rect', { class: 'heat-cell heat-' + heatLevel(a, d.tok) + (d.day === M.today ? ' heat-today' : ''),
+        x: labelW + c * step, y: top + r * step, width: cell, height: cell, rx: Math.min(3, cell / 4) });
+      var show = function (e) {
+        showTip(e, dayLabelLong(d.day), d.tok > 0 ? [
+          { label: 'Tokens', value: tokens(d.tok) },
+          { label: 'Spend', value: costText(d.t.cost, d.t.unpriced) },
+          { label: 'Requests', value: thousands(d.t.req) }
+        ] : [{ label: 'No usage', value: '' }]);
+      };
+      rect.addEventListener('mouseenter', show);
+      rect.addEventListener('mousemove', moveTip);
+      rect.addEventListener('mouseleave', hideTip);
+      root.appendChild(rect);
+    });
+    var scroll = el('div', { class: 'heat-scroll' }, root);
+    clear(container).appendChild(scroll);
+    scroll.scrollLeft = scroll.scrollWidth; // newest weeks first on narrow screens
+  }
+  function renderActivity(root) {
+    var a = activityData();
+    var c = chartCard('span-12', 'Activity', 'Daily tokens · last 12 months · follows agent / project / model filters, not the date range', heatLegend());
+    root.appendChild(el('div', { class: 'grid charts', style: { 'margin-top': '14px' } }, c.card));
+    if (!a.activeDays) {
+      emptyChart(c.body, 'No usage in the last 12 months' + (hasDimFilter() ? ' for these filters.' : '.'));
+      return;
+    }
+    heatmap(c.body, a);
+    var stat = function (label, value) { return el('div', null, el('div', { class: 'kpi-label' }, label), el('div', { class: 'heat-stat' }, value)); };
+    c.card.appendChild(el('div', { class: 'heat-stats' },
+      stat('Tokens', tokens(a.total)),
+      stat('Active days', thousands(a.activeDays) + ' of ' + thousands(a.days.length)),
+      stat('Current streak', a.streak + (a.streak === 1 ? ' day' : ' days')),
+      stat('Longest streak', a.longest + (a.longest === 1 ? ' day' : ' days')),
+      stat('Busiest day', dayLabel(a.peak.day) + ' · ' + tokens(a.peak.tok))));
+  }
+
   function renderOverview(root) {
     // Calendar KPIs. Unfiltered values come straight from Engine.Overview;
     // with an agent/project/model filter the same totals are re-summed from
@@ -527,6 +635,7 @@
       kpi('Projected month', money(projected), projMeta),
       budgetTile));
     if (D.limits.length) renderLimits(root);
+    renderActivity(root);
 
     // Selected range.
     var sel = selected(), t = total(sel), sess = selectedSessions();

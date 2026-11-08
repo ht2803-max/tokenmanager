@@ -230,7 +230,10 @@ tokenmanager web --no-scan                # use the database as is, skip ingesti
   Pass `--force` to overwrite without asking. If `--output` names a directory,
   `dashboard.html` is written inside it.
 - **What's inside.** Overview cards (today, week, month, projected month,
-  monthly budget), daily token and spend charts, the input/output/cache mix,
+  monthly budget), a GitHub-style activity heatmap of the last 12 months
+  (hover a day for tokens, spend and requests; it follows the agent / project
+  / model filters but not the date range), daily token and spend charts, the
+  input/output/cache mix,
   spend by agent, plus agents, sessions, projects, models, optimization
   findings, a Tools tab (per-tool table and a "share of input by tool" chart,
   last 30 days) and budgets. You can filter by date range (today, 7 days, 30 days,

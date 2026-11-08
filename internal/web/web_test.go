@@ -454,3 +454,24 @@ func TestLimitsExport(t *testing.T) {
 		t.Fatal("page does not embed limits")
 	}
 }
+
+// The page builds its activity heatmap from the daily facts: they must reach
+// back past the 53-week window, and the week starts on a Monday.
+func TestActivityHeatmapInputs(t *testing.T) {
+	isolate(t)
+	old := now.AddDate(0, 0, -400)
+	d, page := build(t, engine(t, config.Default(),
+		rec("claude-code", "claude-opus-5-5", "s1", "/w", old, 10, 10, 0),
+		rec("claude-code", "claude-opus-5-5", "s2", "/w", now.Add(-time.Hour), 10, 10, 0)))
+	if ws, err := time.ParseInLocation(dayFmt, d.Meta.WeekStart, time.Local); err != nil || ws.Weekday() != time.Monday {
+		t.Fatalf("week_start %q is not a Monday", d.Meta.WeekStart)
+	}
+	if d.Dims.Days[int(d.Facts[0][0])] != old.Format(dayFmt) {
+		t.Fatalf("oldest fact is %s, want %s", d.Dims.Days[int(d.Facts[0][0])], old.Format(dayFmt))
+	}
+	for _, k := range []string{"function renderActivity", "renderActivity(root);", ".heat-cell"} {
+		if !strings.Contains(page, k) {
+			t.Fatalf("page is missing %q", k)
+		}
+	}
+}
