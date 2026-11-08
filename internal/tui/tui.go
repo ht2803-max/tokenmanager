@@ -41,9 +41,10 @@ type snapshot struct {
 	period     analytics.Period
 	recs       []model.Record
 	ov         analytics.Overview
-	daily      []analytics.Point // last 30 days
-	series     []analytics.Point // period series (hourly for today)
-	hourly     []analytics.Point // today, by hour
+	daily      []analytics.Point  // last 30 days
+	activity   analytics.Activity // heatmap, last 53 weeks
+	series     []analytics.Point  // period series (hourly for today)
+	hourly     []analytics.Point  // today, by hour
 	byAgent    []*analytics.Agg
 	byModel    []*analytics.Agg
 	byProject  []*analytics.Agg
@@ -145,6 +146,10 @@ func (m *Model) load() tea.Cmd {
 			return dataMsg(s)
 		}
 		s.daily = eng.DailySeries(recs30, 30, now)
+		if s.activity, err = eng.Activity(f, 53); err != nil {
+			s.err = err
+			return dataMsg(s)
+		}
 		today := analytics.PeriodFor("today", now)
 		s.hourly = eng.Series(recs30, today.From, today.To, time.Hour)
 		if pname == "30d" {

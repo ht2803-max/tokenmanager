@@ -82,6 +82,12 @@ takes a few milliseconds.
 | `?` | help |
 | `q` | quit |
 
+The Overview includes a GitHub-style activity heatmap: one square per day over
+the last 12 months (weeks as columns, Monday on top), shaded by total tokens
+relative to your own active days, with your current and longest streak. It
+follows `--agent/--project/--model` but not the `f` date filter, and appears
+when the terminal has room for it (about 36 rows or more).
+
 The dashboard watches agent directories with filesystem events (fsnotify) and
 updates live while you work. It also rescans slowly as a safety net.
 

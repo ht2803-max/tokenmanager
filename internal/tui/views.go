@@ -372,6 +372,10 @@ func (m *Model) overview(h int) string {
 		top = lipgloss.JoinVertical(lipgloss.Left, top, m.blockPanel(w))
 		rest -= n + 3
 	}
+	if rest-heatmapH >= 12 {
+		top = lipgloss.JoinVertical(lipgloss.Left, top, panel(heatmapTitle(d.activity), heatmap(d.activity, w-4), w, heatmapH, false))
+		rest -= heatmapH
+	}
 	midH := rest / 2
 	botH := rest - midH
 	if w >= 100 {

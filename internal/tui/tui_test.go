@@ -83,7 +83,7 @@ func fixtureModel(t *testing.T) *Model {
 // Every view must fill the terminal exactly: no overflowing or wrapped lines.
 func TestViewsFitTerminal(t *testing.T) {
 	m := fixtureModel(t)
-	sizes := [][2]int{{60, 18}, {80, 24}, {100, 30}, {132, 40}, {220, 60}}
+	sizes := [][2]int{{60, 18}, {80, 24}, {100, 30}, {132, 40}, {132, 50}, {220, 60}}
 	for _, sz := range sizes {
 		m.Update(tea.WindowSizeMsg{Width: sz[0], Height: sz[1]})
 		for v := range viewNames {
@@ -142,6 +142,25 @@ func TestKeyboardNavigation(t *testing.T) {
 	key("?")
 	if !m.help {
 		t.Fatal("? should open help")
+	}
+}
+
+// The Overview shows the activity heatmap when the terminal is tall enough
+// and drops it on small screens.
+func TestOverviewHeatmap(t *testing.T) {
+	m := fixtureModel(t)
+	m.view = vOverview
+	m.Update(tea.WindowSizeMsg{Width: 132, Height: 50})
+	out := m.View()
+	if !strings.Contains(out, "Activity · last 12 months") || !strings.Contains(out, "Less ") {
+		t.Fatalf("heatmap missing at 132x50:\n%s", out)
+	}
+	if m.data.activity.ActiveDays == 0 {
+		t.Fatal("fixture records should make some active days")
+	}
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	if strings.Contains(m.View(), "Activity · last 12 months") {
+		t.Fatal("heatmap should be hidden at 80x24")
 	}
 }
 

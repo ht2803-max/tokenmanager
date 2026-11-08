@@ -230,8 +230,8 @@ type Filter struct {
 	Session  string
 }
 
-// Query returns records matching the filter ordered by time.
-func (d *DB) Query(f Filter) ([]model.Record, error) {
+// where builds the SQL WHERE clause (with leading " WHERE ") and its args.
+func (f Filter) where() (string, []any) {
 	var where []string
 	var args []any
 	if !f.From.IsZero() {
@@ -252,11 +252,42 @@ func (d *DB) Query(f Filter) ([]model.Record, error) {
 	if f.Session != "" {
 		where, args = append(where, "session_id = ?"), append(args, f.Session)
 	}
-	q := "SELECT key,agent,provider,model,session_id,project,ts,input,output,cache_read,cache_write_5m,cache_write_1h,reasoning,context_window,speed,accuracy,reported_cost,source_file FROM records"
-	if len(where) > 0 {
-		q += " WHERE " + strings.Join(where, " AND ")
+	if len(where) == 0 {
+		return "", nil
 	}
-	q += " ORDER BY ts"
+	return " WHERE " + strings.Join(where, " AND "), args
+}
+
+// BucketMillis is the width of a TokenBuckets bucket (15 minutes), fine
+// enough that every UTC offset (including +5:30 and +5:45) falls on a
+// bucket edge, so callers can sum buckets into local days exactly.
+const BucketMillis = 15 * 60 * 1000
+
+// TokenBuckets sums Record.Total() per BucketMillis bucket. Keys are bucket
+// indexes since the Unix epoch (start = key*BucketMillis).
+func (d *DB) TokenBuckets(f Filter) (map[int64]int64, error) {
+	w, args := f.where()
+	q := fmt.Sprintf("SELECT ts/%d, SUM(input+output+cache_read+cache_write_5m+cache_write_1h) FROM records%s GROUP BY 1", BucketMillis, w)
+	rows, err := d.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]int64{}
+	for rows.Next() {
+		var b, n int64
+		if err := rows.Scan(&b, &n); err != nil {
+			return nil, err
+		}
+		out[b] = n
+	}
+	return out, rows.Err()
+}
+
+// Query returns records matching the filter ordered by time.
+func (d *DB) Query(f Filter) ([]model.Record, error) {
+	w, args := f.where()
+	q := "SELECT key,agent,provider,model,session_id,project,ts,input,output,cache_read,cache_write_5m,cache_write_1h,reasoning,context_window,speed,accuracy,reported_cost,source_file FROM records" + w + " ORDER BY ts"
 	rows, err := d.db.Query(q, args...)
 	if err != nil {
 		return nil, err
