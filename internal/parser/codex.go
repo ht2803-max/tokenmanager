@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ht2803-max/tokenmanager/internal/model"
@@ -49,6 +50,13 @@ type codexLine struct {
 			ModelContextWindow int64       `json:"model_context_window"`
 		} `json:"info"`
 		RateLimits *codexRateLimits `json:"rate_limits"`
+		// response_item tool calls and their outputs (measured, never kept)
+		Name      string          `json:"name"`
+		CallID    string          `json:"call_id"`
+		Arguments json.RawMessage `json:"arguments"`
+		Input     json.RawMessage `json:"input"`
+		Action    json.RawMessage `json:"action"`
+		Output    json.RawMessage `json:"output"`
 	} `json:"payload"`
 }
 
@@ -74,12 +82,34 @@ var codexFileID = regexp.MustCompile(`([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 // and resets_at. The latest "codex" snapshot is kept in State; snapshots for
 // other limit ids, or with both windows null, are ignored.
 func ParseCodex(r io.Reader, path string, st State) ([]model.Record, int64, error) {
+	recs, _, n, err := ParseCodexTools(r, path, st)
+	return recs, n, err
+}
+
+// codexPending is the State key listing call ids seen since the last
+// token_count: the request that emitted them is only known when its
+// token_count arrives, which may be in a later read.
+const codexPending = "tools_pending"
+
+// maxPending caps the pending list so a file without token_count events
+// cannot grow the saved state without bound.
+const maxPending = 256
+
+// ParseCodexTools is ParseCodex plus tool calls. A rollout logs a call
+// (function_call, custom_tool_call, local_shell_call, web_search_call), then
+// its *_output linked by call_id, and only then the token_count of the request
+// that emitted the call. Calls are emitted when seen and linked to that
+// request by a second, key-only row at its token_count; ids waiting for it
+// are kept in State and dropped once linked.
+func ParseCodexTools(r io.Reader, path string, st State) ([]model.Record, []model.ToolCall, int64, error) {
 	if st["session"] == "" {
 		if m := codexFileID.FindStringSubmatch(filepath.Base(path)); m != nil {
 			st["session"] = m[1]
 		}
 	}
 	var out []model.Record
+	var tools []model.ToolCall
+	pending := strings.Fields(st[codexPending])
 	n, err := ReadLines(r, func(line []byte) {
 		var l codexLine
 		if json.Unmarshal(line, &l) != nil {
@@ -102,6 +132,29 @@ func ParseCodex(r io.Reader, path string, st State) ([]model.Record, int64, erro
 			if p.Cwd != "" {
 				st["cwd"] = p.Cwd
 			}
+		case l.Type == "response_item" && codexCallTypes[p.Type] != "":
+			ts, ok := ParseTime(l.Timestamp)
+			id := firstNonEmpty(p.CallID, p.ID)
+			if !ok || id == "" {
+				return
+			}
+			name := p.Name
+			if name == "" {
+				name = codexCallTypes[p.Type]
+			} else if !strings.HasPrefix(name, "mcp__") && strings.Contains(name, "__") {
+				name = "mcp__" + name // Codex qualifies MCP tools as <server>__<tool>
+			}
+			in := rawLen(p.Arguments) + rawLen(p.Input) + rawLen(p.Action)
+			tools = append(tools, toolCall("codex:"+id, name, "codex", st["session"], "", ts, in))
+			if len(pending) < maxPending {
+				pending = append(pending, "codex:"+id)
+			}
+		case l.Type == "response_item" && strings.HasSuffix(p.Type, "_output") && p.CallID != "":
+			ts, ok := ParseTime(l.Timestamp)
+			if !ok {
+				return
+			}
+			tools = append(tools, toolResult("codex:"+p.CallID, "codex", st["session"], ts, p.Output))
 		case l.Type == "event_msg" && p.Type == "token_count":
 			ts, ok := ParseTime(l.Timestamp)
 			if !ok {
@@ -140,9 +193,28 @@ func ParseCodex(r io.Reader, path string, st State) ([]model.Record, int64, erro
 			}
 			rec.Key = "codex:" + st["session"] + ":" + cum
 			out = append(out, rec)
+			for _, id := range pending {
+				tools = append(tools, model.ToolCall{ID: id, RecordKey: rec.Key, Agent: "codex"})
+			}
+			pending = pending[:0]
 		}
 	})
-	return out, n, err
+	if len(pending) > 0 {
+		st[codexPending] = strings.Join(pending, " ")
+	} else {
+		delete(st, codexPending)
+	}
+	return out, tools, n, err
+}
+
+// codexCallTypes maps response_item call types to the tool name used when
+// the item has none.
+var codexCallTypes = map[string]string{
+	"function_call":    "function",
+	"custom_tool_call": "custom",
+	"local_shell_call": "shell",
+	"web_search_call":  "web_search",
+	"tool_search_call": "tool_search",
 }
 
 func codexSnapshot(rl *codexRateLimits, ts time.Time, st State) {

@@ -41,9 +41,10 @@ type snapshot struct {
 	period     analytics.Period
 	recs       []model.Record
 	ov         analytics.Overview
-	daily      []analytics.Point // last 30 days
-	series     []analytics.Point // period series (hourly for today)
-	hourly     []analytics.Point // today, by hour
+	daily      []analytics.Point  // last 30 days
+	activity   analytics.Activity // heatmap, last 53 weeks
+	series     []analytics.Point  // period series (hourly for today)
+	hourly     []analytics.Point  // today, by hour
 	byAgent    []*analytics.Agg
 	byModel    []*analytics.Agg
 	byProject  []*analytics.Agg
@@ -53,6 +54,8 @@ type snapshot struct {
 	agentSt    []agents.Status
 	budgets    []budget.Status
 	limits     []analytics.PlanReport
+	tools      analytics.ToolReport
+	byTool     []*analytics.ToolStat
 	findings   []optimizer.Finding
 	optimized  bool
 	daemonPID  int
@@ -143,6 +146,10 @@ func (m *Model) load() tea.Cmd {
 			return dataMsg(s)
 		}
 		s.daily = eng.DailySeries(recs30, 30, now)
+		if s.activity, err = eng.Activity(f, 53); err != nil {
+			s.err = err
+			return dataMsg(s)
+		}
 		today := analytics.PeriodFor("today", now)
 		s.hourly = eng.Series(recs30, today.From, today.To, time.Hour)
 		if pname == "30d" {
@@ -169,6 +176,11 @@ func (m *Model) load() tea.Cmd {
 		s.byProject = eng.Group(s.recs, analytics.ByProject)
 		s.byProvider = eng.Group(s.recs, analytics.ByProvider)
 		s.sessions = eng.Sessions(s.recs)
+		if s.tools, err = eng.Tools(s.period, f, s.recs); err != nil {
+			s.err = err
+			return dataMsg(s)
+		}
+		s.byTool = s.tools.Group(analytics.ByTool)
 		n := len(recs30)
 		s.latest = append([]model.Record(nil), recs30[max(0, n-60):]...)
 		for _, a := range agents.All() {
@@ -376,6 +388,10 @@ func (m *Model) listLen() int {
 			return len(m.data.byAgent)
 		}
 		return min(len(m.data.sessions), 50)
+	case vUsage:
+		if m.detail {
+			return len(m.filteredTools())
+		}
 	case vAgents:
 		return len(m.data.agentSt)
 	case vSessions:
@@ -405,6 +421,20 @@ func (m *Model) filteredSessions() []*analytics.Session {
 	for _, s := range m.data.sessions {
 		if strings.Contains(strings.ToLower(s.Agent+" "+s.Project+" "+s.ID+" "+strings.Join(s.Models(), " ")), q) {
 			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func (m *Model) filteredTools() []*analytics.ToolStat {
+	q := m.query()
+	if q == "" {
+		return m.data.byTool
+	}
+	var out []*analytics.ToolStat
+	for _, t := range m.data.byTool {
+		if strings.Contains(strings.ToLower(t.Key), q) {
+			out = append(out, t)
 		}
 	}
 	return out

@@ -45,6 +45,9 @@ type Result struct {
 	Changed int
 	Added   []model.Record
 	Errors  []error
+	// Reparsed counts previously read files re-read once from the start to
+	// backfill data an older version did not collect (for example tool calls).
+	Reparsed int
 }
 
 // Scan walks every enabled adapter's files and ingests new data. Files whose
@@ -52,11 +55,12 @@ type Result struct {
 func (c *Collector) Scan() Result {
 	var res Result
 	// One-time re-read of files ingested before a parser learned new fields
-	// (Codex rate_limits). Dedup keys keep the re-read idempotent.
+	// (Codex rate_limits, tool calls). Dedup keys and tool-row merging keep
+	// the re-read idempotent.
 	reparse := map[string]bool{}
-	for agent, flag := range reparseOnce {
-		if c.db.Get(flag) == "" {
-			reparse[agent] = true
+	for _, ro := range reparseOnce {
+		if c.db.Get(ro.flag) == "" {
+			reparse[ro.agent] = true
 		}
 	}
 	for _, a := range agents.All() {
@@ -69,6 +73,11 @@ func (c *Collector) Scan() Result {
 		}
 		for _, f := range st.Files {
 			res.Files++
+			seen := false
+			if reparse[a.Name] {
+				fs, _ := c.db.GetFile(f)
+				seen = fs.Offset > 0 || fs.Size > 0
+			}
 			added, changed, err := c.ingest(a, f, reparse[a.Name])
 			if err != nil {
 				res.Errors = append(res.Errors, err)
@@ -76,13 +85,18 @@ func (c *Collector) Scan() Result {
 			}
 			if changed {
 				res.Changed++
+				if seen {
+					res.Reparsed++
+				}
 			}
 			res.Added = append(res.Added, added...)
 		}
 	}
-	for agent := range reparse {
-		if len(res.Errors) == 0 {
-			_ = c.db.Set(reparseOnce[agent], "1")
+	if len(res.Errors) == 0 {
+		for _, ro := range reparseOnce {
+			if reparse[ro.agent] {
+				_ = c.db.Set(ro.flag, "1")
+			}
 		}
 	}
 	if c.cfg.RetentionDays > 0 {
@@ -91,8 +105,16 @@ func (c *Collector) Scan() Result {
 	return res
 }
 
-// reparseOnce maps an agent to the kv flag recording its one-time re-read.
-var reparseOnce = map[string]string{"codex": "reparsed:codex_rate_limits"}
+// reparseOnce lists one-time re-reads and the kv flag recording each. A
+// re-read keeps every stored record (unlike "scan --rebuild", which would
+// drop history whose transcripts the agent has since deleted) and only adds
+// what the old parser skipped.
+var reparseOnce = []struct{ agent, flag string }{
+	{"codex", "reparsed:codex_rate_limits"},
+	{"claude-code", "reparsed:tool_calls"},
+	{"codex", "reparsed:tool_calls"},
+	{"gemini-cli", "reparsed:tool_calls"},
+}
 
 func (c *Collector) ingest(a *agents.Adapter, path string, force bool) ([]model.Record, bool, error) {
 	c.mu.Lock()
@@ -129,7 +151,15 @@ func (c *Collector) ingest(a *agents.Adapter, path string, force bool) ([]model.
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return nil, false, err
 	}
-	recs, n, perr := a.Parse(f, path, state)
+	var recs []model.Record
+	var tools []model.ToolCall
+	var n int64
+	var perr error
+	if a.ParseTools != nil {
+		recs, tools, n, perr = a.ParseTools(f, path, state)
+	} else {
+		recs, n, perr = a.Parse(f, path, state)
+	}
 	if c.cfg.Privacy.HideProjectPaths {
 		for i := range recs {
 			if recs[i].Project != "" {
@@ -140,6 +170,9 @@ func (c *Collector) ingest(a *agents.Adapter, path string, force bool) ([]model.
 	added, err := c.db.Insert(recs)
 	if err != nil {
 		return nil, true, err
+	}
+	if err := c.db.UpsertTools(tools); err != nil {
+		return added, true, err
 	}
 	if v := state[parser.RateLimitsKey]; v != "" {
 		var rl model.RateLimits

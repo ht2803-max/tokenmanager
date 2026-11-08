@@ -2,7 +2,10 @@
 // the storage layer, analytics and the user interfaces.
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Accuracy describes how trustworthy a metric is.
 type Accuracy string
@@ -78,4 +81,74 @@ type RateLimits struct {
 	Observed  time.Time        `json:"observed"`
 	Primary   *RateLimitWindow `json:"primary,omitempty"`
 	Secondary *RateLimitWindow `json:"secondary,omitempty"`
+}
+
+// ToolCall is one tool invocation (a tool_use block, a Codex function call,
+// ...) and the size of its result. Only the tool name and byte counts are
+// kept: inputs, outputs, paths, commands and URLs are measured, never stored.
+//
+// Parsers emit partial rows (the call, later its result, or a late link to
+// the request) and storage merges them by ID, so a row may be incomplete
+// until every part has been read.
+type ToolCall struct {
+	ID          string    // provider call id (tool_use.id, call_id): the merge key
+	RecordKey   string    // Record.Key of the request that emitted the call
+	SessionID   string    // agent session id
+	Timestamp   time.Time // when the call (or, until it is seen, the result) was logged
+	Agent       string    // adapter name
+	Tool        string    // normalized tool name (MCP: the tool part only)
+	MCPServer   string    // MCP server for mcp__<server>__<tool> names
+	InputBytes  int64     // byte length of the call input (measured, not stored)
+	ResultBytes int64     // byte length of the result text sent back to the model
+	// ResultTokens estimates the result's prompt tokens: ~4 bytes per token
+	// of text plus a fixed allowance per image.
+	ResultTokens int64
+	HasResult    bool
+}
+
+// ImageTokens is the per-image estimate used for image tool results, whose
+// base64 size says nothing about their token cost.
+const ImageTokens = 1600
+
+// OtherTool groups calls whose name is empty or not a plain identifier.
+const OtherTool = "other"
+
+// NormalizeTool maps a raw tool name to (tool, mcp server). Built-in names
+// are kept as they are; "mcp__<server>__<tool>" is split so usage can be
+// grouped by server. Names that are empty, very long or contain anything but
+// identifier characters become "other", so free text can never be stored.
+func NormalizeTool(name string) (tool, server string) {
+	if !plainName(name) {
+		return OtherTool, ""
+	}
+	if rest, ok := strings.CutPrefix(name, "mcp__"); ok {
+		srv, t, ok := strings.Cut(rest, "__")
+		if !ok || srv == "" || t == "" {
+			return OtherTool, ""
+		}
+		return t, srv
+	}
+	return name, ""
+}
+
+// ToolLabel is the display name of a normalized tool: "server/tool" for MCP.
+func ToolLabel(tool, server string) string {
+	if server != "" {
+		return server + "/" + tool
+	}
+	return tool
+}
+
+func plainName(s string) bool {
+	if s == "" || len(s) > 96 {
+		return false
+	}
+	for _, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '-', c == '.', c == ':':
+		default:
+			return false
+		}
+	}
+	return true
 }

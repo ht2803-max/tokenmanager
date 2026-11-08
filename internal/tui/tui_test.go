@@ -51,6 +51,18 @@ func fixtureModel(t *testing.T) *Model {
 	if _, err := db.Insert(recs); err != nil {
 		t.Fatal(err)
 	}
+	// Tool calls (with long MCP names) so the Tools panel and session detail render rows.
+	var calls []model.ToolCall
+	toolNames := []string{"Read", "Bash", "Grep", "mcp__a-very-long-server-name__with_a_long_tool_name", "Edit"}
+	for i, r := range recs {
+		tool, srv := model.NormalizeTool(toolNames[i%len(toolNames)])
+		calls = append(calls, model.ToolCall{ID: fmt.Sprint("tu", i), RecordKey: r.Key, SessionID: r.SessionID, Timestamp: r.Timestamp,
+			Agent: r.Agent, Tool: tool, MCPServer: srv, InputBytes: int64(40 + i), ResultBytes: int64(4000 * (i%7 + 1)),
+			ResultTokens: int64(1000 * (i%7 + 1)), HasResult: true})
+	}
+	if err := db.UpsertTools(calls); err != nil {
+		t.Fatal(err)
+	}
 	// A current Codex snapshot so the Limits view renders reported windows.
 	err = db.SaveRateLimits(model.RateLimits{Provider: "openai", Agent: "codex", Plan: "plus", Observed: now,
 		Primary:   &model.RateLimitWindow{UsedPercent: 42, WindowMinutes: 300, ResetsAt: now.Add(2 * time.Hour)},
@@ -71,7 +83,7 @@ func fixtureModel(t *testing.T) *Model {
 // Every view must fill the terminal exactly: no overflowing or wrapped lines.
 func TestViewsFitTerminal(t *testing.T) {
 	m := fixtureModel(t)
-	sizes := [][2]int{{60, 18}, {80, 24}, {100, 30}, {132, 40}, {220, 60}}
+	sizes := [][2]int{{60, 18}, {80, 24}, {100, 30}, {132, 40}, {132, 50}, {220, 60}}
 	for _, sz := range sizes {
 		m.Update(tea.WindowSizeMsg{Width: sz[0], Height: sz[1]})
 		for v := range viewNames {
@@ -130,6 +142,25 @@ func TestKeyboardNavigation(t *testing.T) {
 	key("?")
 	if !m.help {
 		t.Fatal("? should open help")
+	}
+}
+
+// The Overview shows the activity heatmap when the terminal is tall enough
+// and drops it on small screens.
+func TestOverviewHeatmap(t *testing.T) {
+	m := fixtureModel(t)
+	m.view = vOverview
+	m.Update(tea.WindowSizeMsg{Width: 132, Height: 50})
+	out := m.View()
+	if !strings.Contains(out, "Activity · last 12 months") || !strings.Contains(out, "Less ") {
+		t.Fatalf("heatmap missing at 132x50:\n%s", out)
+	}
+	if m.data.activity.ActiveDays == 0 {
+		t.Fatal("fixture records should make some active days")
+	}
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	if strings.Contains(m.View(), "Activity · last 12 months") {
+		t.Fatal("heatmap should be hidden at 80x24")
 	}
 }
 

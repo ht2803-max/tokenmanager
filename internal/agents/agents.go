@@ -41,6 +41,8 @@ type Adapter struct {
 	Match func(path string) bool
 	Mode  ReadMode
 	Parse ParseFunc
+	// ParseTools, when set, is used instead of Parse and also reports tool calls.
+	ParseTools parser.ToolParseFunc
 	// Detect locates an installation even when no usage files exist.
 	Detect func() []string
 	// Availability documents what the agent exposes locally.
@@ -147,6 +149,7 @@ func claudeCode() *Adapter {
 		Match:        func(p string) bool { return strings.HasSuffix(p, ".jsonl") },
 		Mode:         Append,
 		Parse:        parser.ParseClaude,
+		ParseTools:   parser.ParseClaudeTools,
 		Availability: model.Actual,
 		Note:         "Per-request usage from session transcripts (incl. subagents and cache tokens).",
 	}
@@ -168,6 +171,7 @@ func codex() *Adapter {
 		},
 		Mode:         Append,
 		Parse:        parser.ParseCodex,
+		ParseTools:   parser.ParseCodexTools,
 		Availability: model.Actual,
 		Note:         "Per-request usage from rollout token_count events. Costs need a price for the model in config.yaml if it is not built in.",
 	}
@@ -182,6 +186,7 @@ func geminiCLI() *Adapter {
 		},
 		Mode:         Whole,
 		Parse:        parser.ParseGemini,
+		ParseTools:   parser.ParseGeminiTools,
 		Detect:       func() []string { return []string{home(".gemini")} },
 		Availability: model.Actual,
 		Note:         "Reads chat files saved by Gemini CLI (~/.gemini/tmp/*/chats). Projects are identified by hash.",
