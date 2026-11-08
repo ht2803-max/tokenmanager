@@ -83,7 +83,7 @@ func fixtureModel(t *testing.T) *Model {
 // Every view must fill the terminal exactly: no overflowing or wrapped lines.
 func TestViewsFitTerminal(t *testing.T) {
 	m := fixtureModel(t)
-	sizes := [][2]int{{60, 18}, {80, 24}, {100, 30}, {132, 40}, {132, 50}, {220, 60}}
+	sizes := [][2]int{{60, 18}, {80, 24}, {80, 29}, {99, 40}, {100, 24}, {100, 30}, {120, 26}, {132, 40}, {132, 50}, {220, 60}}
 	for _, sz := range sizes {
 		m.Update(tea.WindowSizeMsg{Width: sz[0], Height: sz[1]})
 		for v := range viewNames {
@@ -145,22 +145,51 @@ func TestKeyboardNavigation(t *testing.T) {
 	}
 }
 
-// The Overview shows the activity heatmap when the terminal is tall enough
-// and drops it on small screens.
+// The Overview shows the activity heatmap: full width when the terminal is
+// tall, in the 30-day chart's place on ordinary sizes, hidden only when tiny.
 func TestOverviewHeatmap(t *testing.T) {
 	m := fixtureModel(t)
-	m.view = vOverview
-	m.Update(tea.WindowSizeMsg{Width: 132, Height: 50})
-	out := m.View()
-	if !strings.Contains(out, "Activity · last 12 months") || !strings.Contains(out, "Less ") {
-		t.Fatalf("heatmap missing at 132x50:\n%s", out)
-	}
 	if m.data.activity.ActiveDays == 0 {
 		t.Fatal("fixture records should make some active days")
 	}
-	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	if strings.Contains(m.View(), "Activity · last 12 months") {
-		t.Fatal("heatmap should be hidden at 80x24")
+	for _, c := range []struct {
+		w, h      int
+		heat, bar bool // heatmap shown, 30-day chart shown
+	}{
+		{132, 50, true, true},
+		{120, 30, true, false},
+		{100, 24, true, false},
+		{80, 24, true, false},
+		{60, 18, false, false},
+	} {
+		m.view = vOverview
+		m.Update(tea.WindowSizeMsg{Width: c.w, Height: c.h})
+		out := m.View()
+		if got := strings.Contains(out, "Activity · last"); got != c.heat {
+			t.Errorf("%dx%d: heatmap shown = %v, want %v\n%s", c.w, c.h, got, c.heat, out)
+		}
+		if got := strings.Contains(out, "Token consumption"); got != c.bar {
+			t.Errorf("%dx%d: 30-day chart shown = %v, want %v", c.w, c.h, got, c.bar)
+		}
+	}
+}
+
+// heatmap fills exactly the cells it is given at every size it supports.
+func TestHeatmapSizes(t *testing.T) {
+	m := fixtureModel(t)
+	for _, w := range []int{40, 56, 76, 110, 200} {
+		for h := 7; h <= 9; h++ {
+			out := heatmap(m.data.activity, w, h)
+			lines := strings.Split(out, "\n")
+			if len(lines) != h {
+				t.Errorf("w=%d h=%d: %d lines", w, h, len(lines))
+			}
+			for i, l := range lines {
+				if lipgloss.Width(l) != w {
+					t.Errorf("w=%d h=%d: line %d is %d wide", w, h, i, lipgloss.Width(l))
+				}
+			}
+		}
 	}
 }
 
