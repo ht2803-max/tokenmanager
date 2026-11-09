@@ -67,6 +67,19 @@ plans:
 notifications:
   enabled: true   # desktop alerts from the daemon (macOS / Linux notify-send)
 
+# Agent status board (tokenmanager status) and "waiting for you" alerts.
+# State is inferred from session files; "waiting" is a heuristic (a tool call
+# with no result and no file writes for waiting_after), so a long-running
+# tool can look like a permission prompt.
+status:
+  waiting_after: 20s      # unanswered tool call + silence => waiting
+  idle_after: 10m         # done/working with no activity => idle
+  stale_after: 2h         # hidden unless --stale
+  notify_waiting: true    # daemon notification when a session starts waiting
+  notify_done: false      # also notify when a session finishes its turn
+  mute_projects: []       # substrings of project paths
+  mute_agents: []         # e.g. [codex]
+
 privacy:
   hide_project_paths: false   # store only the last path element of projects
 

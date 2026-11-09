@@ -149,7 +149,7 @@ Run without arguments to open the interactive dashboard.`,
 		periodCmd("month", "Show this month's spending and token consumption"),
 		agentsCmd(), sessionsCmd(), projectsCmd(), modelsCmd(), costsCmd(),
 		optimizeCmd(), toolsCmd(), budgetCmd(), limitsCmd(), watchCmd(), exportCmd(), daemonCmd(),
-		scanCmd(), configCmd(), webCmd(),
+		scanCmd(), configCmd(), webCmd(), statusCmd(),
 	)
 	return root
 }

@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ht2803-max/tokenmanager/internal/config"
 	"github.com/ht2803-max/tokenmanager/internal/model"
@@ -26,6 +27,10 @@ const (
 	// Whole files are rewritten in place and re-parsed in full on change.
 	Whole
 )
+
+// ProbeFunc infers a session's live state from the tail of one of its files.
+// It returns false when the file says nothing about a session.
+type ProbeFunc func(path string, tail []byte, mtime, now time.Time, o model.ProbeOptions) (model.StatusEvent, bool)
 
 // ParseFunc parses a source file starting at the reader's position.
 type ParseFunc func(r io.Reader, path string, st parser.State) ([]model.Record, int64, error)
@@ -43,6 +48,8 @@ type Adapter struct {
 	Parse ParseFunc
 	// ParseTools, when set, is used instead of Parse and also reports tool calls.
 	ParseTools parser.ToolParseFunc
+	// Probe, when set, lets the status board show this agent's sessions.
+	Probe ProbeFunc
 	// Detect locates an installation even when no usage files exist.
 	Detect func() []string
 	// Availability documents what the agent exposes locally.
@@ -150,6 +157,7 @@ func claudeCode() *Adapter {
 		Mode:         Append,
 		Parse:        parser.ParseClaude,
 		ParseTools:   parser.ParseClaudeTools,
+		Probe:        parser.ProbeClaude,
 		Availability: model.Actual,
 		Note:         "Per-request usage from session transcripts (incl. subagents and cache tokens).",
 	}
@@ -172,6 +180,7 @@ func codex() *Adapter {
 		Mode:         Append,
 		Parse:        parser.ParseCodex,
 		ParseTools:   parser.ParseCodexTools,
+		Probe:        parser.ProbeCodex,
 		Availability: model.Actual,
 		Note:         "Per-request usage from rollout token_count events. Costs need a price for the model in config.yaml if it is not built in.",
 	}

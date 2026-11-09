@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -50,6 +51,53 @@ type Budgets struct {
 // Notifications controls desktop alerts sent by the daemon.
 type Notifications struct {
 	Enabled bool `yaml:"enabled"`
+}
+
+// Status configures the agent status board (tokenmanager status) and the
+// daemon's "waiting for you" notifications. Zero values use the defaults
+// returned by the accessor methods.
+type Status struct {
+	WaitingAfter  Duration `yaml:"waiting_after,omitempty"`  // default 20s
+	IdleAfter     Duration `yaml:"idle_after,omitempty"`     // default 10m
+	StaleAfter    Duration `yaml:"stale_after,omitempty"`    // default 2h
+	NotifyWaiting *bool    `yaml:"notify_waiting,omitempty"` // default true
+	NotifyDone    bool     `yaml:"notify_done,omitempty"`
+	MuteProjects  []string `yaml:"mute_projects,omitempty"` // substrings of project paths
+	MuteAgents    []string `yaml:"mute_agents,omitempty"`
+}
+
+func orDefault(d Duration, def time.Duration) time.Duration {
+	if d.Duration <= 0 {
+		return def
+	}
+	return d.Duration
+}
+
+// Waiting is how long an unanswered tool call must sit before a session counts as waiting.
+func (s Status) Waiting() time.Duration { return orDefault(s.WaitingAfter, 20*time.Second) }
+
+// Idle is how long without activity before a session counts as idle.
+func (s Status) Idle() time.Duration { return orDefault(s.IdleAfter, 10*time.Minute) }
+
+// Stale is how long without activity before a session is hidden.
+func (s Status) Stale() time.Duration { return orDefault(s.StaleAfter, 2*time.Hour) }
+
+// NotifiesWaiting reports whether waiting sessions trigger a notification.
+func (s Status) NotifiesWaiting() bool { return s.NotifyWaiting == nil || *s.NotifyWaiting }
+
+// Muted reports whether notifications for this agent/project are silenced.
+func (s Status) Muted(agent, project string) bool {
+	for _, a := range s.MuteAgents {
+		if a == agent {
+			return true
+		}
+	}
+	for _, p := range s.MuteProjects {
+		if p != "" && strings.Contains(project, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // Privacy controls what is persisted.
@@ -135,6 +183,7 @@ type Config struct {
 	Plans           Plans                  `yaml:"plans,omitempty"`
 	Notifications   Notifications          `yaml:"notifications"`
 	Privacy         Privacy                `yaml:"privacy"`
+	Status          Status                 `yaml:"status,omitempty"`
 	DatabasePath    string                 `yaml:"database_path,omitempty"`
 }
 

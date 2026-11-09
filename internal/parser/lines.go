@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -65,4 +66,43 @@ func UnixAuto(n float64) time.Time {
 		return time.UnixMilli(int64(n))
 	}
 	return time.Unix(int64(n), int64((n-float64(int64(n)))*1e9))
+}
+
+// TailSize is how much of a session file status probes read from the end.
+const TailSize = 64 * 1024
+
+// ReadTail returns up to max bytes from the end of the file at path. When the
+// read starts mid-file, the first (partial) line is dropped so the result
+// holds whole lines only.
+func ReadTail(path string, max int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	start := info.Size() - max
+	if start < 0 {
+		start = 0
+	}
+	buf := make([]byte, info.Size()-start)
+	if _, err := f.ReadAt(buf, start); err != nil && err != io.EOF {
+		return nil, err
+	}
+	return trimPartialHead(buf, start > 0), nil
+}
+
+// trimPartialHead drops everything up to the first newline when the buffer
+// starts in the middle of a line.
+func trimPartialHead(b []byte, midFile bool) []byte {
+	if !midFile {
+		return b
+	}
+	if i := bytes.IndexByte(b, '\n'); i >= 0 {
+		return b[i+1:]
+	}
+	return nil // one huge line with no start in view
 }

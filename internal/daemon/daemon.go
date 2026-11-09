@@ -15,12 +15,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ht2803-max/tokenmanager/internal/agents"
 	"github.com/ht2803-max/tokenmanager/internal/analytics"
 	"github.com/ht2803-max/tokenmanager/internal/budget"
 	"github.com/ht2803-max/tokenmanager/internal/collector"
 	"github.com/ht2803-max/tokenmanager/internal/config"
 	"github.com/ht2803-max/tokenmanager/internal/format"
 	"github.com/ht2803-max/tokenmanager/internal/model"
+	"github.com/ht2803-max/tokenmanager/internal/status"
 	"github.com/ht2803-max/tokenmanager/internal/storage"
 )
 
@@ -129,6 +131,10 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	go func() { errc <- coll.Watch(ctx, ch) }()
 	tick := time.NewTicker(5 * time.Minute)
 	defer tick.Stop()
+	sw := newStatusWatch(cfg)
+	sw.check(log) // seeds: sessions already waiting at startup do not notify
+	stick := time.NewTicker(statusInterval)
+	defer stick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -143,6 +149,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		case <-tick.C:
 			checkBudgets(eng, db, cfg, log)
 			checkBlocks(eng, db, cfg, log)
+		case <-stick.C:
+			sw.check(log)
 		}
 	}
 }
@@ -218,6 +226,127 @@ func checkBlocks(eng *analytics.Engine, db *storage.DB, cfg *config.Config, log 
 			}
 		}
 	}
+}
+
+// statusInterval is how often the daemon re-checks agent session states.
+const statusInterval = 3 * time.Second
+
+// renotifyAfter suppresses a repeat notification for a session that flaps
+// back into the same state shortly after one was sent.
+const renotifyAfter = time.Minute
+
+// statusWatch turns agent status transitions into desktop notifications.
+type statusWatch struct {
+	cfg    *config.Config
+	scan   *status.Scanner
+	track  *status.Tracker
+	sent   map[string]time.Time // agent|session|state -> last notification
+	notify func(title, msg string) error
+	now    func() time.Time
+}
+
+func newStatusWatch(cfg *config.Config) *statusWatch {
+	return &statusWatch{cfg: cfg, scan: status.NewScanner(cfg), track: status.NewTracker(),
+		sent: map[string]time.Time{}, notify: Notify, now: time.Now}
+}
+
+// check scans sessions and sends at most one notification per state
+// (waiting, done) per check, naming every session that just entered it.
+func (w *statusWatch) check(log *slog.Logger) {
+	trs := w.track.Update(w.scan.Scan())
+	if !w.cfg.Notifications.Enabled {
+		return
+	}
+	now := w.now()
+	var waiting, done []model.StatusEvent
+	for _, tr := range trs {
+		ev := tr.Event
+		if w.cfg.Status.Muted(ev.Agent, ev.Project) {
+			continue
+		}
+		k := ev.Agent + "|" + ev.SessionID + "|" + string(ev.State)
+		if t, ok := w.sent[k]; ok && now.Sub(t) < renotifyAfter {
+			continue
+		}
+		switch {
+		case ev.State == model.StateWaiting && w.cfg.Status.NotifiesWaiting():
+			waiting = append(waiting, ev)
+		case ev.State == model.StateDone && w.cfg.Status.NotifyDone && tr.From == model.StateWorking:
+			done = append(done, ev)
+		default:
+			continue
+		}
+		w.sent[k] = now
+	}
+	for k, t := range w.sent {
+		if now.Sub(t) > time.Hour {
+			delete(w.sent, k)
+		}
+	}
+	for _, n := range []struct {
+		evs  []model.StatusEvent
+		verb string
+	}{{waiting, "waiting"}, {done, "done"}} {
+		if len(n.evs) == 0 {
+			continue
+		}
+		title, msg := StatusMessage(n.evs, n.verb)
+		log.Info("status notification", "state", n.verb, "sessions", len(n.evs))
+		if err := w.notify(title, msg); err != nil {
+			log.Warn("notification failed", "err", err)
+		}
+	}
+}
+
+// StatusMessage builds the notification for sessions that entered one state.
+// File-inferred waiting is a guess, so it says "probably".
+func StatusMessage(evs []model.StatusEvent, verb string) (title, msg string) {
+	label := func(ev model.StatusEvent) string {
+		p := filepath.Base(ev.Project)
+		if p == "." || p == "/" || p == "" {
+			p = ev.Agent
+		}
+		return p
+	}
+	low := false
+	for _, ev := range evs {
+		low = low || ev.Confidence == model.Low
+	}
+	state := verb
+	if verb == "waiting" {
+		state = "waiting for you"
+		if low {
+			state = "probably waiting for you"
+		}
+	}
+	if len(evs) == 1 {
+		ev := evs[0]
+		title = fmt.Sprintf("%s · %s", label(ev), agentDisplay(ev.Agent))
+		msg = capitalize(state)
+		if ev.Detail != "" {
+			msg += ": " + ev.Detail
+		}
+		return title, msg
+	}
+	names := make([]string, 0, len(evs))
+	for _, ev := range evs {
+		names = append(names, label(ev))
+	}
+	return fmt.Sprintf("%d agents %s", len(evs), state), strings.Join(names, ", ")
+}
+
+func agentDisplay(name string) string {
+	if a := agents.ByName(name); a != nil {
+		return a.Display
+	}
+	return name
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // Notify shows a desktop notification using the platform's native tool.

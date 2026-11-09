@@ -106,6 +106,7 @@ updates live while you work. It also rescans slowly as a safety net.
 | `budget`, `budget set monthly 100 [--for agent:claude-code]`, `budget rm …` | budgets |
 | `limits [-n 10]` (alias `blocks`) | subscription windows: current 5h block, burn rate, projection, weekly window, recent blocks |
 | `watch` | live stream of new requests with running cost |
+| `status [--watch] [--stale]` | what each Claude Code / Codex session is doing: working, waiting, done, idle ([Agent status](#agent-status)) |
 | `export [-f json\|csv] [-o file]` | per-request records |
 | `daemon start\|stop\|status\|run` | background collector + budget and window alerts |
 | `scan [--rebuild]` | ingest now / rebuild the database |
@@ -267,6 +268,46 @@ tokenmanager web --no-scan                # use the database as is, skip ingesti
 while the TUI is closed. To start it at login, see `packaging/launchd` (macOS)
 or `packaging/systemd` (Linux).
 
+## Agent status
+
+`tokenmanager status` shows every Claude Code and Codex session that was
+active recently, grouped by project, so you can see which one needs you
+without checking each terminal. `tokenmanager status --watch` keeps the view
+open and refreshes it every 2 seconds.
+
+```
+  AGENT STATUS  1 waiting · 1 working · 1 done
+
+  Project    Agent        State     Last activity  Detail
+  ~/src/api  claude-code  waiting?        42s ago  Permission needed: Bash
+  ~/src/web  codex        working          2s ago  Running shell
+  ~/src/cli  claude-code  done              3m ago
+```
+
+| State | Meaning |
+|---|---|
+| `waiting` | blocked on you: a permission prompt or a question |
+| `working` | generating or running tools |
+| `done` | finished its turn; the next move is yours |
+| `idle` | no activity for `status.idle_after` (default 10m) |
+| `stale` | no activity for `status.stale_after` (default 2h); shown only with `--stale` |
+
+State is inferred from the tail of each session file. No database is used and
+no prompt or response text is kept. `waiting` is a heuristic: a tool call with
+no result and no file writes for `status.waiting_after` (default 20s). A slow
+tool, such as a long test run, looks the same, so inferred waiting is shown as
+`waiting?` (`"confidence": "low"` in `--json`).
+
+With the daemon running (`tokenmanager daemon start`), a desktop notification
+fires when a session starts waiting. Several sessions that start waiting in the
+same check are combined into one notification, and none fire for sessions
+already waiting when the daemon starts. Set `status.notify_done: true` to also
+be told when a turn finishes, and use `status.mute_projects` or
+`status.mute_agents` to silence some of them. See `config.example.yaml`.
+
+`tokenmanager status` is unrelated to `tokenmanager daemon status`, which only
+reports whether the daemon is running.
+
 ## Tools
 
 `tokenmanager tools` breaks usage down by tool name (`Read`, `Bash`, `Grep`,
@@ -376,6 +417,7 @@ internal/pricing      price table and cost calculation
 internal/analytics    aggregation, periods, series, projections, subscription blocks, tool attribution
 internal/optimizer    findings and savings estimates
 internal/budget       budget evaluation
+internal/status       agent status board: per-file probes merged per session, state tracker
 internal/daemon       background collector, notifications
 internal/web          standalone HTML dashboard export (embedded assets)
 internal/config       YAML configuration
@@ -402,5 +444,7 @@ line overflows the terminal.
 - Usage from provider APIs (for example Anthropic's Admin usage API). All data
   currently comes from local files.
 - Cursor usage. Cursor doesn't store it locally.
+- Agent status: only Claude Code and Codex. There are no hook-based (exact)
+  waiting signals, no local socket API, no menu bar app and no jump-to-terminal.
 - Native Windows notifications (alerts are still logged), and testing on
   Windows in general.
